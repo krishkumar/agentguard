@@ -241,8 +241,8 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Chained command blocked');
-      expect(result.reason).toContain('rm -rf /');
+      // May be blocked by catastrophic path detection OR chained command validation
+      expect(result.reason).toMatch(/Catastrophic path|Chained command blocked/);
     });
 
     it('blocks chain if first segment is blocked', () => {
@@ -338,7 +338,8 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Chained command blocked');
+      // May be blocked by catastrophic path detection OR chained command validation
+      expect(result.reason).toMatch(/Catastrophic path|Chained command blocked/);
     });
 
     it('allows chain with default policy when no rules match', () => {
@@ -352,6 +353,169 @@ describe('RuleEngine', () => {
 
       expect(result.action).toBe(ValidationAction.ALLOW);
       expect(result.reason).toContain('default policy');
+    });
+  });
+
+  describe('Catastrophic path detection', () => {
+    /**
+     * Tests for the catastrophic path detection feature.
+     * This catches attacks like "rm -rf node_modules dist ~/" where dangerous paths
+     * are hidden among benign-looking arguments.
+     */
+
+    // Helper to create a command with proper segments for catastrophic path detection
+    const createCommandWithSegments = (cmd: string, args: string[]): ParsedCommand => ({
+      original: `${cmd} ${args.join(' ')}`,
+      normalized: `${cmd} ${args.join(' ')}`,
+      tokens: [],
+      segments: [{
+        command: cmd,
+        args: args,
+        operator: undefined
+      }],
+      isChained: false,
+      isPiped: false
+    });
+
+    it('should block rm -rf with home directory hidden among safe paths', () => {
+      // This is the sneaky attack: looks like cleanup but deletes home dir
+      const homeDir = require('os').homedir();
+      const command = createCommandWithSegments('rm', ['-rf', 'node_modules', 'dist', homeDir]);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system/user files');
+    });
+
+    it('should block rm -rf with ~ (tilde) hidden among arguments', () => {
+      const homeDir = require('os').homedir();
+      // After tokenizer expansion, ~ becomes the actual home directory path
+      const command = createCommandWithSegments('rm', ['-rf', 'temp', 'cache', homeDir]);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
+    });
+
+    it('should block rm -rf /', () => {
+      const command = createCommandWithSegments('rm', ['-rf', '/']);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
+    });
+
+    it('should block rm -rf /home', () => {
+      const command = createCommandWithSegments('rm', ['-rf', '/home']);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
+    });
+
+    it('should block rm -rf /etc', () => {
+      const command = createCommandWithSegments('rm', ['-rf', '/etc']);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
+    });
+
+    it('should block rm -r (without -f) with catastrophic paths', () => {
+      const homeDir = require('os').homedir();
+      const command = createCommandWithSegments('rm', ['-r', homeDir]);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
+    });
+
+    it('should block rm with combined flags like -fR', () => {
+      const homeDir = require('os').homedir();
+      const command = createCommandWithSegments('rm', ['-fR', homeDir]);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
+    });
+
+    it('should NOT block rm -rf with safe paths only', () => {
+      const command = createCommandWithSegments('rm', ['-rf', 'node_modules', 'dist']);
+      const rules = [createRule(RuleType.ALLOW, 'rm -rf *')];
+
+      const result = engine.validate(command, rules);
+
+      // Should be allowed (no catastrophic paths)
+      expect(result.action).toBe(ValidationAction.ALLOW);
+    });
+
+    it('should NOT block rm (without recursive flag) even with dangerous paths', () => {
+      // rm without -r/-R is less dangerous as it won't delete directories
+      const command = createCommandWithSegments('rm', ['-f', 'somefile']);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      // Should be allowed (no recursive flag)
+      expect(result.action).toBe(ValidationAction.ALLOW);
+    });
+
+    it('should NOT block other commands even with dangerous paths in args', () => {
+      // ls /home should not be blocked
+      const command = createCommandWithSegments('ls', ['-la', '/home']);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.ALLOW);
+    });
+
+    it('should block rm -rf with /var', () => {
+      const command = createCommandWithSegments('rm', ['-rf', '/var']);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
+    });
+
+    it('should block rm -rf with /usr', () => {
+      const command = createCommandWithSegments('rm', ['-rf', '/usr']);
+      const rules: Rule[] = [];
+
+      const result = engine.validate(command, rules);
+
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
+    });
+
+    it('catastrophic path check runs before pattern rules', () => {
+      // Even with an ALLOW rule for rm -rf *, catastrophic paths should be blocked
+      const homeDir = require('os').homedir();
+      const command = createCommandWithSegments('rm', ['-rf', 'safe', homeDir]);
+      const rules = [createRule(RuleType.ALLOW, 'rm -rf *', 100)]; // High specificity allow
+
+      const result = engine.validate(command, rules);
+
+      // Should still be blocked despite the ALLOW rule
+      expect(result.action).toBe(ValidationAction.BLOCK);
+      expect(result.reason).toContain('Catastrophic path');
     });
   });
 });
