@@ -317,11 +317,16 @@ class RuleEngine {
 ```
 
 **Validation Logic**:
-1. Check PROTECT directives first (if command writes to protected path → BLOCK)
-2. Check SANDBOX directives (if command writes outside sandbox → BLOCK)
-3. Match against pattern rules (BLOCK/CONFIRM/ALLOW)
-4. If no match, default to ALLOW
-5. Return result with reason and metadata
+1. Parse command into segments using CommandTokenizer
+2. For each segment, recursively unwrap command wrappers using CommandUnwrapper
+3. Check for inherently dangerous commands (mkfs, dd to block devices, etc.) → BLOCK
+4. Check for catastrophic paths with destructive commands (rm -rf /, etc.) → BLOCK
+5. Analyze script content if executing a script file → BLOCK if dangerous patterns found
+6. Check PROTECT directives (if command writes to protected path → BLOCK)
+7. Check SANDBOX directives (if command writes outside sandbox → BLOCK)
+8. Match against pattern rules (BLOCK/CONFIRM/ALLOW)
+9. If no match, default to ALLOW
+10. Return result with reason and metadata
 
 **Write Operation Detection**:
 Commands are considered write operations if they use:
@@ -332,6 +337,27 @@ Commands are considered write operations if they use:
 - `mkdir` (create directory)
 - `chmod`, `chown` (modify permissions)
 - `>`, `>>` (redirect output)
+
+**Inherently Dangerous Commands Detection**:
+Certain commands are inherently dangerous regardless of their arguments and are blocked automatically. The RuleEngine maintains a list of such commands:
+
+1. **Filesystem Formatting Commands** - Always blocked:
+   - `mkfs`, `mkfs.ext2`, `mkfs.ext3`, `mkfs.ext4`
+   - `mkfs.xfs`, `mkfs.btrfs`, `mkfs.vfat`
+   - `mke2fs`, `mkswap`
+
+2. **Disk Partitioning Tools** - Always blocked:
+   - `fdisk`, `parted`, `gdisk`
+   - `cfdisk`, `sfdisk`
+
+3. **Block Device Writing via `dd`** - Blocked when writing to block devices:
+   - `dd of=/dev/sd*` (SATA/SCSI drives)
+   - `dd of=/dev/nvme*` (NVMe drives)
+   - `dd of=/dev/vd*` (virtual drives)
+   - `dd of=/dev/xvd*` (Xen virtual drives)
+   - `dd of=/dev/mmcblk*` (SD cards/eMMC)
+
+These commands bypass the normal rule matching process and are blocked at the earliest opportunity in the validation pipeline with a clear explanation of why they are inherently dangerous.
 
 ### 6. Guard Shell Wrapper
 
@@ -735,6 +761,199 @@ bash -c "rm -rf /"  # Validated by AgentGuard
 
 **Note**: This approach is more invasive than hooks and is provided as an alternative for tools that don't support hooks. The Claude hook approach is recommended when available.
 
+### 14. Command Unwrapper
+
+**Responsibility**: Recursively unwrap command wrappers to find the actual command being executed. This is critical for detecting dangerous commands hidden behind wrappers like `sudo`, `bash -c`, `xargs`, or `find -exec`.
+
+### 15. Script Analyzer
+
+**Responsibility**: Analyze script file contents for dangerous operations before execution. When a command executes a script file (e.g., `python script.py`, `bash script.sh`), the ScriptAnalyzer reads the script and scans for destructive patterns.
+
+**Interface**:
+```typescript
+type ScriptRuntime = 'shell' | 'python' | 'node' | 'ruby' | 'perl' | 'unknown';
+
+interface ScriptThreat {
+  pattern: string;           // Pattern ID that matched
+  lineNumber: number;        // Line where threat was found
+  lineContent: string;       // Actual line content
+  category: 'deletion' | 'system_modification' | 'data_exfiltration' | 'shell_execution';
+  severity: 'low' | 'medium' | 'high' | 'catastrophic';
+  targetPaths?: string[];    // Paths that would be affected
+}
+
+interface ScriptAnalysisResult {
+  scriptPath: string;
+  analyzed: boolean;         // False if file couldn't be read
+  analysisError?: string;    // Error message if analysis failed
+  runtime: ScriptRuntime;
+  threats: ScriptThreat[];
+  shouldBlock: boolean;
+  blockReason?: string;
+}
+
+class ScriptAnalyzer {
+  // Detect if command is executing a script file
+  detectScriptExecution(segment: CommandSegment): string | null;
+
+  // Analyze script content for dangerous patterns
+  analyze(scriptPath: string): ScriptAnalysisResult;
+
+  // Detect runtime from shebang or extension
+  private detectRuntime(scriptPath: string, content?: string): ScriptRuntime;
+
+  // Read file safely with limits (1MB max, 10K lines)
+  private readScriptSafe(scriptPath: string): { content: string; error?: string };
+
+  // Extract threats from content
+  private extractThreats(content: string, runtime: ScriptRuntime): ScriptThreat[];
+}
+```
+
+**Script Execution Detection**:
+
+Detects commands like:
+- `python script.py`, `python3 /path/to/script.py`
+- `node app.js`, `node ./script.mjs`
+- `bash script.sh`, `sh ./deploy.sh`
+- `./script.sh`, `/path/to/script.py` (direct execution)
+- `ruby script.rb`, `perl script.pl`
+
+**NOT detected** (inline code):
+- `python -c "print('hi')"`
+- `bash -c "echo hello"`
+- `python -m pip install requests`
+
+**Dangerous Patterns by Runtime**:
+
+**Shell** (`.sh`, `.bash`):
+```regex
+/\brm\s+(-[a-zA-Z]*r[a-zA-Z]*\s+|--recursive\s+)/   # rm -rf
+/\brmdir\b/                                          # rmdir
+/\bdd\s+.*\bof=/                                     # dd writes
+/\bmkfs\b/                                           # format
+/\bshred\b/                                          # secure delete
+```
+
+**Python** (`.py`):
+```regex
+/\bshutil\.rmtree\s*\(/                              # shutil.rmtree()
+/\bos\.(remove|unlink|rmdir)\s*\(/                   # os.remove/unlink
+/\bos\.system\s*\(['"](rm\s|rmdir)/                  # os.system('rm...')
+/\bsubprocess\.(run|call|Popen)\s*\([^)]*rm\s+-rf/   # subprocess rm
+```
+
+**Node** (`.js`, `.mjs`, `.cjs`):
+```regex
+/\bfs\.(rmSync|unlinkSync|rmdirSync)\s*\(/           # sync deletion
+/\bfs\.rm\s*\([^)]*recursive:\s*true/                # fs.rm recursive
+/\bchild_process\.(exec|spawn)\s*\(['"](rm\s|rmdir)/ # child_process rm
+/\brimraf\s*\(/                                       # rimraf package
+```
+
+**Catastrophic Path Detection**:
+When a deletion threat is detected, the script is also scanned for catastrophic paths (/, /home, /etc, /var, /usr, /boot, /root, ~). If any are found alongside a deletion threat, the script is blocked.
+
+**Fail-Open Behavior**:
+When analysis fails, ALLOW the command:
+- File doesn't exist → Allow (might be created first)
+- File unreadable → Allow (permissions issue)
+- Binary file → Allow (not analyzable)
+- Size limit exceeded (>1MB) → Allow with warning
+- Parse errors → Allow (conservative)
+
+**Integration with RuleEngine**:
+Added after `checkCatastrophicPaths()` in the validation pipeline:
+
+```typescript
+private scriptAnalyzer = new ScriptAnalyzer();
+
+private checkScriptContent(unwrapped: UnwrappedCommand): ValidationResult | null {
+  const segment = { command: unwrapped.command, args: unwrapped.args };
+  const scriptPath = this.scriptAnalyzer.detectScriptExecution(segment);
+
+  if (!scriptPath) return null;  // Not a script execution
+
+  const analysis = this.scriptAnalyzer.analyze(scriptPath);
+
+  if (!analysis.analyzed) return null;  // Fail-open
+
+  if (analysis.shouldBlock) {
+    return {
+      action: ValidationAction.BLOCK,
+      reason: analysis.blockReason || `Script "${scriptPath}" contains dangerous operations`,
+      metadata: { estimatedImpact: 'high' }
+    };
+  }
+  return null;
+}
+```
+
+**Interface**:
+```typescript
+interface UnwrappedCommand {
+  command: string;           // The actual command (e.g., "rm")
+  args: string[];            // Arguments to the command
+  wrappers: string[];        // Chain of wrappers (e.g., ["sudo", "bash -c"])
+  hasDynamicArgs: boolean;   // True if args come from external source
+  dynamicReason?: string;    // Explanation if hasDynamicArgs is true
+  originalSegment: CommandSegment;
+}
+
+class CommandUnwrapper {
+  unwrap(segment: CommandSegment): UnwrappedCommand[];
+  private unwrapRecursive(segment: CommandSegment, wrappers: string[]): UnwrappedCommand[];
+  private unwrapPassthrough(segment: CommandSegment, wrapper: string, wrappers: string[]): UnwrappedCommand[] | null;
+  private unwrapShellC(segment: CommandSegment, shell: string, wrappers: string[]): UnwrappedCommand[];
+  private unwrapXargs(segment: CommandSegment, executor: string, wrappers: string[]): UnwrappedCommand | null;
+  private unwrapFind(segment: CommandSegment, wrappers: string[]): UnwrappedCommand[];
+  private parseCommandString(commandString: string): CommandSegment[];
+  private simpleTokenize(str: string): string[];
+}
+```
+
+**Supported Wrappers**:
+
+1. **Passthrough Wrappers**: Commands that simply pass through to another command
+   - `sudo`, `doas`: Privilege escalation
+   - `env`: Environment modification
+   - `nice`, `ionice`: Priority adjustment
+   - `nohup`: Background execution
+   - `time`, `timeout`: Timing control
+   - `watch`: Repeated execution
+   - `strace`, `ltrace`: Tracing
+   - `chroot`, `runuser`, `su`: User/environment switching
+
+2. **Shell -c Wrappers**: Shells that execute command strings
+   - `bash -c`, `sh -c`, `zsh -c`, `dash -c`
+   - `fish -c`, `ksh -c`, `csh -c`, `tcsh -c`
+
+3. **Dynamic Executors**: Commands that execute other commands with dynamic arguments
+   - `xargs`: Arguments from stdin
+   - `parallel`: Parallel execution with dynamic args
+   - `find -exec`, `find -execdir`: Execute on matched files
+   - `find -ok`, `find -okdir`: Interactive execution on matched files
+   - `find -delete`: Delete matched files
+
+**Unwrapping Examples**:
+```
+sudo rm -rf /                    → rm -rf / (wrappers: ["sudo"])
+bash -c "rm -rf /"               → rm -rf / (wrappers: ["bash -c"])
+sudo env PATH=/bin bash -c "rm -rf /"  → rm -rf / (wrappers: ["sudo", "env", "bash -c"])
+find / -exec rm -rf {} \;        → rm -rf (wrappers: ["find -exec"], hasDynamicArgs: true)
+xargs rm -rf                     → rm -rf (wrappers: ["xargs"], hasDynamicArgs: true)
+```
+
+**Dynamic Argument Detection**:
+Commands executed via `xargs`, `parallel`, or `find -exec` are flagged with `hasDynamicArgs: true` because their actual targets come from external sources (stdin or file matching). This is important for security analysis since the actual files affected cannot be determined statically.
+
+**Integration with RuleEngine**:
+The CommandUnwrapper is used by the RuleEngine's `checkCatastrophicPaths()` method to detect dangerous commands hidden behind wrappers. For each segment in a parsed command:
+1. Unwrap to find actual command(s)
+2. Check if any unwrapped command is destructive (rm, rmdir, unlink, shred)
+3. If destructive with recursive flags and dynamic args → BLOCK
+4. If destructive with recursive flags targeting catastrophic paths → BLOCK
+
 ## Data Models
 
 ### Rule
@@ -777,6 +996,19 @@ interface ValidationResult {
     targetPaths?: string[];
     estimatedImpact?: 'low' | 'medium' | 'high' | 'catastrophic';
   };
+}
+```
+
+### UnwrappedCommand
+
+```typescript
+interface UnwrappedCommand {
+  command: string;           // The actual command being executed
+  args: string[];            // Arguments to the command
+  wrappers: string[];        // Chain of wrappers that were unwrapped
+  hasDynamicArgs: boolean;   // True if arguments come from external source
+  dynamicReason?: string;    // Explanation for dynamic args (e.g., "xargs - arguments come from stdin")
+  originalSegment: CommandSegment;  // Original segment before unwrapping
 }
 ```
 
@@ -992,6 +1224,18 @@ Property 39: Hook uninstallation
 *For any* settings file containing AgentGuard hooks configuration, uninstalling should remove the hooks configuration while preserving other settings
 **Validates: Requirements 21.1, 21.2, 21.3**
 
+Property 40: Script content analysis blocking
+*For any* command that executes a script file containing dangerous operations (deletion with catastrophic paths), the command should be blocked before execution
+**Validates: Script content analysis requirement**
+
+Property 41: Script content analysis fail-open
+*For any* command that executes a script file that cannot be read (missing, binary, too large), the command should be allowed (fail-open behavior)
+**Validates: Script content analysis fail-open requirement**
+
+Property 42: Script content analysis safe scripts
+*For any* command that executes a script file containing only safe operations (no deletion patterns with catastrophic paths), the command should be allowed
+**Validates: Script content analysis requirement**
+
 ### Example-Based Tests
 
 Example 1: Block catastrophic rm -rf /
@@ -1061,6 +1305,18 @@ Verify that when the Claude hook receives `echo hello` via stdin, it exits with 
 Example 17: Kiro instructions display
 Verify that `agentguard install kiro` displays usage instructions for the wrapper approach
 **Validates: Requirements 23.1, 23.2**
+
+Example 18: Script analysis blocks dangerous Python script
+Verify that `python script.py` is blocked when script.py contains `shutil.rmtree("/")`
+**Validates: Script content analysis requirement**
+
+Example 19: Script analysis blocks dangerous shell script
+Verify that `bash script.sh` is blocked when script.sh contains `rm -rf /`
+**Validates: Script content analysis requirement**
+
+Example 20: Script analysis allows safe scripts
+Verify that `python safe.py` is allowed when script contains only `print("Hello")`
+**Validates: Script content analysis fail-open requirement**
 
 ### Edge Cases
 
@@ -1389,6 +1645,7 @@ tests/
 │   ├── cli.test.ts
 │   ├── rule-parser.test.ts
 │   ├── command-tokenizer.test.ts
+│   ├── command-unwrapper.test.ts
 │   ├── pattern-matcher.test.ts
 │   ├── rule-engine.test.ts
 │   ├── audit-logger.test.ts
@@ -1600,6 +1857,8 @@ agentguard/
 │   ├── cli.ts                    # [P0] CLI interface and argument parsing
 │   ├── rule-parser.ts            # [P0] Rule file parsing
 │   ├── command-tokenizer.ts      # [P0] Shell command tokenization
+│   ├── command-unwrapper.ts      # [P0] Recursive command unwrapping
+│   ├── script-analyzer.ts        # [P1] Script content analysis
 │   ├── pattern-matcher.ts        # [P0] Glob pattern matching
 │   ├── rule-engine.ts            # [P0] Validation logic
 │   ├── process-spawner.ts        # [P0] Process management
@@ -1613,8 +1872,10 @@ agentguard/
 │   └── agentguard-shell          # [P0] Shell wrapper script
 ├── tests/
 │   ├── unit/                     # [P0] Unit tests
+│   │   └── script-analyzer.test.ts  # [P1] Script analysis tests
 │   ├── property/                 # [P0] Property-based tests
 │   ├── integration/              # [P1] Integration tests
+│   │   └── script-analysis.test.ts  # [P1] Script analysis integration
 │   └── fixtures/                 # [P0] Test data
 ├── templates/
 │   └── default-rules.txt         # [P1] Default .agentguard template (for init)

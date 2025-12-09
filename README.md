@@ -18,6 +18,8 @@ Inspired by `.gitignore`: simple pattern matching, one rule per line, easy for a
 
 - Deterministic rules, not probabilistic LLM guardrails
 - `.gitignore`-style syntax anyone can read
+- Recursive command unwrapping (catches `sudo bash -c "rm -rf /"`)
+- Catastrophic path detection (blocks `rm -rf /`, `rm -rf ~`, etc.)
 - Zero latency—all validation is local
 - Claude Code hook integration
 
@@ -48,6 +50,26 @@ That's it. Every shell command Claude tries to run now goes through AgentGuard f
 ## What it does
 
 AgentGuard intercepts shell commands before they execute and validates them against a simple rules file. If a command matches a block pattern, it gets stopped. If it's allowed, it runs normally.
+
+### Recursive Command Unwrapping
+
+AgentGuard doesn't just look at the surface command—it recursively unwraps nested command wrappers to find what's actually being executed. This catches attempts to hide dangerous commands behind innocent-looking wrappers:
+
+```bash
+# All of these get unwrapped to detect the underlying "rm" command:
+sudo rm -rf /                    # → rm -rf /
+bash -c "rm -rf /"               # → rm -rf /
+sudo env PATH=/bin bash -c "rm -rf /"  # → rm -rf /
+find / -exec rm -rf {} \;        # → rm (with dynamic args)
+xargs rm -rf                     # → rm (with dynamic args)
+```
+
+**Supported wrappers:**
+- **Passthrough**: `sudo`, `doas`, `env`, `nice`, `nohup`, `timeout`, `time`, `watch`, `strace`, `ltrace`, `ionice`, `chroot`, `runuser`, `su`
+- **Shell -c**: `bash`, `sh`, `zsh`, `dash`, `fish`, `ksh`, `csh`, `tcsh`
+- **Dynamic executors**: `xargs`, `parallel`, `find -exec`, `find -delete`
+
+Commands executed via `xargs` or `find -exec` are flagged as having dynamic arguments, since their actual targets come from stdin or file matching.
 
 Here's what that looks like in practice:
 
@@ -108,6 +130,31 @@ Right now this only works with Claude Code's hook system. I'd like to add suppor
 - Other agentic tools as they add hook APIs
 
 The core validation logic is agent-agnostic, so adding new integrations is mostly about figuring out each tool's interception mechanism.
+
+## Limitations & Security Model
+
+AgentGuard is **defense-in-depth**, not a complete sandbox.
+
+### What AgentGuard Does
+
+- Blocks dangerous shell commands before execution
+- Scans for catastrophic paths (`/`, `~`, `/home`) anywhere in arguments
+- Unwraps wrapper commands (`sudo`, `bash -c`) to find the real command
+- Analyzes script contents before execution (Python, Node, Shell)
+- Provides project-specific rules versioned with your code
+
+### What AgentGuard Does NOT Do
+
+- **Full sandboxing** — Use Docker/containers for true isolation
+- **Binary inspection** — Cannot analyze compiled executables
+- **Network blocking** — Does not prevent data exfiltration
+- **Complete bypass prevention** — A determined attacker can work around pattern matching
+
+### Why Use AgentGuard?
+
+Many developers run AI agents with `--dangerously-skip-permissions` or habitually auto-accept prompts. AgentGuard catches the common footguns—accidental `rm -rf /`, leaked credentials, that one script that drops staging—even when permission prompts are bypassed.
+
+For critical systems, combine AgentGuard with containerization. This tool handles the everyday "oh no what did it just run" moments; Docker handles the adversarial edge cases.
 
 ## Built with
 

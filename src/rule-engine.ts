@@ -4,23 +4,44 @@
 
 import * as os from 'os';
 import * as path from 'path';
-import { ParsedCommand, Rule, ValidationResult, ValidationAction, RuleType } from './types';
+import { ParsedCommand, Rule, ValidationResult, ValidationAction, RuleType, UnwrappedCommand, CommandSegment } from './types';
 import { PatternMatcher } from './pattern-matcher';
+import { CommandUnwrapper } from './command-unwrapper';
+import { ScriptAnalyzer } from './script-analyzer';
 
 export class RuleEngine {
   private matcher: PatternMatcher;
+  private unwrapper: CommandUnwrapper;
+  private scriptAnalyzer: ScriptAnalyzer;
 
   // Commands that can cause catastrophic damage when given dangerous paths
-  private readonly DESTRUCTIVE_COMMANDS = ['rm'];
+  private readonly DESTRUCTIVE_COMMANDS = ['rm', 'rmdir', 'unlink', 'shred'];
 
   // Flags that indicate recursive/forced deletion
   private readonly DESTRUCTIVE_FLAGS = ['-rf', '-fr', '-r', '-R', '--recursive'];
+
+  // Commands that are inherently catastrophic and should always be blocked
+  private readonly INHERENTLY_DANGEROUS_COMMANDS = [
+    'mkfs', 'mkfs.ext2', 'mkfs.ext3', 'mkfs.ext4', 'mkfs.xfs', 'mkfs.btrfs', 'mkfs.vfat',
+    'mke2fs', 'mkswap', 'fdisk', 'parted', 'gdisk', 'cfdisk', 'sfdisk'
+  ];
+
+  // Patterns for dangerous dd commands (writing to block devices)
+  private readonly DANGEROUS_DD_PATTERNS = [
+    /of=\/dev\/[hs]d[a-z]/, // of=/dev/sda, /dev/hda
+    /of=\/dev\/nvme/,       // of=/dev/nvme0n1
+    /of=\/dev\/vd[a-z]/,    // of=/dev/vda (virtual disks)
+    /of=\/dev\/xvd[a-z]/,   // of=/dev/xvda (Xen virtual disks)
+    /of=\/dev\/mmcblk/,     // of=/dev/mmcblk0 (SD cards)
+  ];
 
   // Paths that should always be blocked for destructive commands
   private readonly CATASTROPHIC_PATHS: string[] = [];
 
   constructor() {
     this.matcher = new PatternMatcher();
+    this.unwrapper = new CommandUnwrapper();
+    this.scriptAnalyzer = new ScriptAnalyzer();
 
     // Initialize catastrophic paths (computed at runtime)
     const homeDir = os.homedir();
@@ -56,7 +77,13 @@ export class RuleEngine {
    * 7. If no match, default to ALLOW
    */
   validate(command: ParsedCommand, rules: Rule[]): ValidationResult {
-    // FIRST: Check for catastrophic paths in destructive commands
+    // FIRST: Check for inherently dangerous commands (mkfs, dd to devices, etc.)
+    const dangerousCommandResult = this.checkInherentlyDangerousCommands(command);
+    if (dangerousCommandResult) {
+      return dangerousCommandResult;
+    }
+
+    // SECOND: Check for catastrophic paths in destructive commands
     // This catches attacks like "rm -rf node_modules dist ~/"
     const catastrophicResult = this.checkCatastrophicPaths(command);
     if (catastrophicResult) {
@@ -232,94 +259,43 @@ export class RuleEngine {
   }
 
   /**
-   * Check if a command contains catastrophic paths that should always be blocked.
-   * This catches attacks like "rm -rf node_modules dist ~/" where dangerous paths
-   * are hidden among benign-looking arguments.
+   * Check for inherently dangerous commands that should always be blocked.
+   * These are commands that can cause catastrophic damage regardless of arguments:
+   * - mkfs.* - Format filesystems
+   * - dd of=/dev/* - Write directly to block devices
+   * - fdisk, parted, etc. - Partition manipulation
    */
-  private checkCatastrophicPaths(command: ParsedCommand): ValidationResult | null {
+  private checkInherentlyDangerousCommands(command: ParsedCommand): ValidationResult | null {
     for (const segment of command.segments) {
-      // Only check destructive commands
-      const baseCommand = path.basename(segment.command);
-      if (!this.DESTRUCTIVE_COMMANDS.includes(baseCommand)) {
-        continue;
-      }
+      // Unwrap the command to find the actual commands being executed
+      const unwrappedCommands = this.unwrapper.unwrap(segment);
 
-      // Check if command has destructive flags
-      const hasDestructiveFlags = segment.args.some(arg =>
-        this.DESTRUCTIVE_FLAGS.some(flag => {
-          // Handle combined flags like -rf, -fr, etc.
-          if (arg.startsWith('-') && !arg.startsWith('--')) {
-            // Single dash flag - check if it contains 'r' (recursive)
-            const flagChars = arg.slice(1);
-            return flagChars.includes('r') || flagChars.includes('R');
-          }
-          return arg === flag;
-        })
-      );
+      for (const unwrapped of unwrappedCommands) {
+        const baseCommand = path.basename(unwrapped.command);
 
-      if (!hasDestructiveFlags) {
-        continue;
-      }
-
-      // Check each argument for catastrophic paths
-      for (const arg of segment.args) {
-        // Skip flags
-        if (arg.startsWith('-')) {
-          continue;
+        // Check for inherently dangerous commands (mkfs, fdisk, etc.)
+        if (this.INHERENTLY_DANGEROUS_COMMANDS.includes(baseCommand)) {
+          return {
+            action: ValidationAction.BLOCK,
+            reason: `BLOCKED: "${baseCommand}" is a dangerous system command that can destroy data`,
+            metadata: {
+              estimatedImpact: 'catastrophic'
+            }
+          };
         }
 
-        // Normalize the path for comparison
-        const normalizedArg = this.normalizePath(arg);
-
-        // Check against catastrophic paths
-        for (const dangerousPath of this.CATASTROPHIC_PATHS) {
-          const normalizedDangerous = this.normalizePath(dangerousPath);
-
-          // Exact match or trying to delete parent of catastrophic path
-          if (normalizedArg === normalizedDangerous) {
-            return {
-              action: ValidationAction.BLOCK,
-              reason: `BLOCKED: Catastrophic path detected - "${arg}" would delete critical system/user files`,
-              metadata: {
-                targetPaths: [arg],
-                estimatedImpact: 'catastrophic'
-              }
-            };
-          }
-
-          // Check if argument is a parent directory of a catastrophic path
-          // e.g., rm -rf /home when /home/user is catastrophic
-          if (normalizedDangerous.startsWith(normalizedArg + '/')) {
-            return {
-              action: ValidationAction.BLOCK,
-              reason: `BLOCKED: Path "${arg}" contains critical system/user directories`,
-              metadata: {
-                targetPaths: [arg],
-                estimatedImpact: 'catastrophic'
-              }
-            };
-          }
-        }
-
-        // Additional check: wildcard that could match catastrophic paths
-        if (arg === '*' || arg === '/*' || arg === '~/*' || arg === '$HOME/*') {
-          const cwd = process.cwd();
-          // If we're in a catastrophic directory and using *, block it
-          for (const dangerousPath of this.CATASTROPHIC_PATHS) {
-            if (cwd === this.normalizePath(dangerousPath) ||
-                cwd.startsWith(this.normalizePath(dangerousPath) + '/') === false &&
-                this.normalizePath(dangerousPath).startsWith(cwd + '/')) {
-              // We're either in a dangerous dir or dangerous dir is under cwd
-              if (arg === '*') {
-                return {
-                  action: ValidationAction.BLOCK,
-                  reason: `BLOCKED: Wildcard "*" in "${cwd}" could affect critical directories`,
-                  metadata: {
-                    targetPaths: [arg],
-                    estimatedImpact: 'catastrophic'
-                  }
-                };
-              }
+        // Check for dangerous dd commands (writing to block devices)
+        if (baseCommand === 'dd') {
+          const fullArgs = unwrapped.args.join(' ');
+          for (const pattern of this.DANGEROUS_DD_PATTERNS) {
+            if (pattern.test(fullArgs)) {
+              return {
+                action: ValidationAction.BLOCK,
+                reason: `BLOCKED: "dd" writing to block device can destroy disk data`,
+                metadata: {
+                  estimatedImpact: 'catastrophic'
+                }
+              };
             }
           }
         }
@@ -327,6 +303,214 @@ export class RuleEngine {
     }
 
     return null;
+  }
+
+  /**
+   * Check if a command contains catastrophic paths that should always be blocked.
+   * This catches attacks like "rm -rf node_modules dist ~/" where dangerous paths
+   * are hidden among benign-looking arguments.
+   *
+   * Uses recursive unwrapping to detect wrapped commands like:
+   * - sudo rm -rf /
+   * - bash -c "rm -rf /"
+   * - find / -exec rm {} \;
+   */
+  private checkCatastrophicPaths(command: ParsedCommand): ValidationResult | null {
+    for (const segment of command.segments) {
+      // Unwrap the command to find the actual commands being executed
+      const unwrappedCommands = this.unwrapper.unwrap(segment);
+
+      for (const unwrapped of unwrappedCommands) {
+        // Check for catastrophic paths in the unwrapped command
+        const pathResult = this.checkUnwrappedCommand(unwrapped);
+        if (pathResult) {
+          return pathResult;
+        }
+
+        // Check script contents for dangerous patterns
+        const scriptResult = this.checkScriptContent(unwrapped);
+        if (scriptResult) {
+          return scriptResult;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Check script content for dangerous patterns.
+   * If the command is executing a script file, analyze its contents.
+   */
+  private checkScriptContent(unwrapped: UnwrappedCommand): ValidationResult | null {
+    // Reconstruct command segment for script detection
+    const segment: CommandSegment = {
+      command: unwrapped.command,
+      args: unwrapped.args
+    };
+
+    // Check if this is a script execution
+    const scriptPath = this.scriptAnalyzer.detectScriptExecution(segment);
+    if (!scriptPath) {
+      return null; // Not a script execution
+    }
+
+    // Build wrapper context for error messages
+    const wrapperContext = unwrapped.wrappers.length > 0
+      ? ` (via ${unwrapped.wrappers.join(' → ')})`
+      : '';
+
+    // Analyze the script
+    const analysis = this.scriptAnalyzer.analyze(scriptPath);
+
+    // If analysis failed, fail-open (allow the command)
+    if (!analysis.analyzed) {
+      // Could log warning here in future
+      return null;
+    }
+
+    // Block if script contains dangerous operations
+    if (analysis.shouldBlock) {
+      const threatSummary = analysis.threats
+        .slice(0, 3) // Show first 3 threats
+        .map(t => `${t.pattern} at line ${t.lineNumber}`)
+        .join(', ');
+
+      return {
+        action: ValidationAction.BLOCK,
+        reason: `BLOCKED: Script "${scriptPath}" contains dangerous operations${wrapperContext}: ${analysis.blockReason || threatSummary}`,
+        metadata: {
+          targetPaths: analysis.threats.flatMap(t => t.targetPaths || []),
+          estimatedImpact: analysis.threats.some(t => t.severity === 'catastrophic')
+            ? 'catastrophic'
+            : 'high'
+        }
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Check an unwrapped command for catastrophic paths
+   */
+  private checkUnwrappedCommand(unwrapped: UnwrappedCommand): ValidationResult | null {
+    const baseCommand = path.basename(unwrapped.command);
+
+    // Only check destructive commands
+    if (!this.DESTRUCTIVE_COMMANDS.includes(baseCommand)) {
+      return null;
+    }
+
+    // Build wrapper context for error messages
+    const wrapperContext = unwrapped.wrappers.length > 0
+      ? ` (via ${unwrapped.wrappers.join(' → ')})`
+      : '';
+
+    // If the command has dynamic args (xargs, find -exec), block if targeting a destructive command
+    if (unwrapped.hasDynamicArgs) {
+      // Check if this is a recursive/forced deletion
+      const hasDestructiveFlags = this.hasDestructiveFlags(unwrapped.args);
+
+      if (hasDestructiveFlags) {
+        return {
+          action: ValidationAction.BLOCK,
+          reason: `BLOCKED: Dangerous command "${baseCommand}" with recursive flags has dynamic arguments${wrapperContext} - ${unwrapped.dynamicReason}`,
+          metadata: {
+            estimatedImpact: 'catastrophic'
+          }
+        };
+      }
+    }
+
+    // Check if command has destructive flags
+    const hasDestructiveFlags = this.hasDestructiveFlags(unwrapped.args);
+    if (!hasDestructiveFlags) {
+      return null;
+    }
+
+    // Check each argument for catastrophic paths
+    for (const arg of unwrapped.args) {
+      // Skip flags
+      if (arg.startsWith('-')) {
+        continue;
+      }
+
+      // Normalize the path for comparison
+      const normalizedArg = this.normalizePath(arg);
+
+      // Check against catastrophic paths
+      for (const dangerousPath of this.CATASTROPHIC_PATHS) {
+        const normalizedDangerous = this.normalizePath(dangerousPath);
+
+        // Exact match or trying to delete parent of catastrophic path
+        if (normalizedArg === normalizedDangerous) {
+          return {
+            action: ValidationAction.BLOCK,
+            reason: `BLOCKED: Catastrophic path detected - "${arg}" would delete critical system/user files${wrapperContext}`,
+            metadata: {
+              targetPaths: [arg],
+              estimatedImpact: 'catastrophic'
+            }
+          };
+        }
+
+        // Check if argument is a parent directory of a catastrophic path
+        // e.g., rm -rf /home when /home/user is catastrophic
+        if (normalizedDangerous.startsWith(normalizedArg + '/')) {
+          return {
+            action: ValidationAction.BLOCK,
+            reason: `BLOCKED: Path "${arg}" contains critical system/user directories${wrapperContext}`,
+            metadata: {
+              targetPaths: [arg],
+              estimatedImpact: 'catastrophic'
+            }
+          };
+        }
+      }
+
+      // Additional check: wildcard that could match catastrophic paths
+      if (arg === '*' || arg === '/*' || arg === '~/*' || arg === '$HOME/*') {
+        const cwd = process.cwd();
+        // If we're in a catastrophic directory and using *, block it
+        for (const dangerousPath of this.CATASTROPHIC_PATHS) {
+          if (cwd === this.normalizePath(dangerousPath) ||
+              cwd.startsWith(this.normalizePath(dangerousPath) + '/') === false &&
+              this.normalizePath(dangerousPath).startsWith(cwd + '/')) {
+            // We're either in a dangerous dir or dangerous dir is under cwd
+            if (arg === '*') {
+              return {
+                action: ValidationAction.BLOCK,
+                reason: `BLOCKED: Wildcard "*" in "${cwd}" could affect critical directories${wrapperContext}`,
+                metadata: {
+                  targetPaths: [arg],
+                  estimatedImpact: 'catastrophic'
+                }
+              };
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if arguments contain destructive flags
+   */
+  private hasDestructiveFlags(args: string[]): boolean {
+    return args.some(arg =>
+      this.DESTRUCTIVE_FLAGS.some(flag => {
+        // Handle combined flags like -rf, -fr, etc.
+        if (arg.startsWith('-') && !arg.startsWith('--')) {
+          // Single dash flag - check if it contains 'r' (recursive)
+          const flagChars = arg.slice(1);
+          return flagChars.includes('r') || flagChars.includes('R');
+        }
+        return arg === flag;
+      })
+    );
   }
 
   /**

@@ -518,11 +518,141 @@
     - Copy to dist during build
     - _Requirements: 1.1_
 
+- [x] 17d. Implement recursive command unwrapping [P0]
+  - [x] 17d.1 Create CommandUnwrapper class
+    - Implement unwrap() method to recursively find actual commands
+    - Handle passthrough wrappers (sudo, doas, env, nice, nohup, timeout, time, watch, strace, ltrace, ionice, chroot, runuser, su)
+    - Handle shell -c wrappers (bash, sh, zsh, dash, fish, ksh, csh, tcsh)
+    - Handle dynamic executors (xargs, parallel)
+    - Handle find patterns (-exec, -execdir, -ok, -okdir, -delete)
+    - Track wrapper chain for context
+    - Mark dynamic argument commands appropriately
+    - _Requirements: 1.3 (validation must unwrap commands to find actual operation)_
+
+  - [x] 17d.2 Add UnwrappedCommand interface to types.ts
+    - command: string (actual command being executed)
+    - args: string[] (arguments to the command)
+    - wrappers: string[] (chain of wrappers)
+    - hasDynamicArgs: boolean (true if args come from external source)
+    - dynamicReason?: string (explanation for dynamic args)
+    - originalSegment: CommandSegment (original segment before unwrapping)
+
+  - [x] 17d.3 Integrate CommandUnwrapper into RuleEngine
+    - Use unwrapper in checkCatastrophicPaths()
+    - Unwrap each segment to find actual commands
+    - Check if unwrapped command is destructive (rm, rmdir, unlink, shred)
+    - Block destructive commands with dynamic args and recursive flags
+    - Block destructive commands targeting catastrophic paths
+    - Include wrapper context in error messages
+
+  - [x] 17d.4 Write comprehensive unit tests for CommandUnwrapper
+    - Test passthrough wrapper unwrapping (sudo, env, nice, timeout)
+    - Test shell -c unwrapping (bash, sh, zsh)
+    - Test nested wrapper unwrapping (sudo + env + bash -c)
+    - Test xargs handling with dynamic args flag
+    - Test find -exec/-delete handling
+    - Test piped commands in bash -c
+    - Test chained commands in bash -c
+    - Test non-wrapper commands pass through unchanged
+
+  - [x] 17d.5 Export CommandUnwrapper from index.ts
+    - Add export for CommandUnwrapper class
+
+- [x] 17e. Implement inherently dangerous commands detection [P0]
+  - [x] 17e.1 Add inherently dangerous commands list to RuleEngine
+    - Define INHERENTLY_DANGEROUS_COMMANDS constant array
+    - Include filesystem formatting commands (mkfs, mkfs.ext2, mkfs.ext3, mkfs.ext4, mkfs.xfs, mkfs.btrfs, mkfs.vfat, mke2fs, mkswap)
+    - Include disk partitioning tools (fdisk, parted, gdisk, cfdisk, sfdisk)
+    - _Requirements: Requirement 24 (Inherently Dangerous Commands)_
+
+  - [x] 17e.2 Add dd block device patterns to RuleEngine
+    - Define DANGEROUS_DD_PATTERNS constant array
+    - Match dd writing to SATA/SCSI drives (of=/dev/sd*)
+    - Match dd writing to NVMe drives (of=/dev/nvme*)
+    - Match dd writing to virtual drives (of=/dev/vd*, of=/dev/xvd*)
+    - Match dd writing to SD cards/eMMC (of=/dev/mmcblk*)
+    - _Requirements: Requirement 24 (Inherently Dangerous Commands)_
+
+  - [x] 17e.3 Implement checkInherentlyDangerousCommands() method
+    - Check if base command is in INHERENTLY_DANGEROUS_COMMANDS list
+    - For 'dd' command, check if any args match DANGEROUS_DD_PATTERNS
+    - Return BLOCK action with clear explanation
+    - Apply to unwrapped commands (detects hidden dangerous commands)
+    - _Requirements: Requirement 24 (Inherently Dangerous Commands)_
+
+  - [x] 17e.4 Integrate into validation pipeline
+    - Call checkInherentlyDangerousCommands() after command unwrapping
+    - Call before checkCatastrophicPaths() for early detection
+    - Include wrapper context in error messages
+    - _Requirements: Validation pipeline ordering_
+
+  - [x] 17e.5 Write unit tests for inherently dangerous commands
+    - Test all mkfs variants are blocked
+    - Test all disk partitioning tools are blocked
+    - Test dd to block devices is blocked
+    - Test dd to regular files is allowed
+    - Test dangerous commands behind wrappers (sudo mkfs.ext4)
+    - _Requirements: Comprehensive test coverage_
+
 - [x] 18. Checkpoint - Ensure all P1 tests pass
   - Run all unit tests and property tests
   - Verify init, check, confirmation, chained, and piped commands work
   - Test with complex command scenarios
   - Ensure all tests pass, ask the user if questions arise
+
+- [x] 18a. Implement script content analysis [P1]
+  - [x] 18a.1 Add script analysis types to types.ts
+    - Define ScriptRuntime type ('shell' | 'python' | 'node' | 'ruby' | 'perl' | 'unknown')
+    - Define ScriptThreat interface (pattern, lineNumber, lineContent, category, severity, targetPaths)
+    - Define ScriptAnalysisResult interface (scriptPath, analyzed, runtime, threats, shouldBlock, blockReason)
+    - _Requirements: Defense in depth for script execution_
+
+  - [x] 18a.2 Create ScriptAnalyzer class
+    - Implement detectScriptExecution() to identify script execution commands
+    - Implement analyze() to scan script contents for dangerous patterns
+    - Implement detectRuntime() to determine script language from shebang/extension
+    - Implement readScriptSafe() with 1MB file size limit
+    - Implement extractThreats() with runtime-specific patterns
+    - _Requirements: Pre-execution script scanning_
+
+  - [x] 18a.3 Define dangerous patterns for each runtime
+    - Shell patterns: rm -rf, rmdir, dd of=, mkfs, shred
+    - Python patterns: shutil.rmtree, os.remove, os.system with rm
+    - Node patterns: fs.rmSync, fs.rm recursive, rimraf
+    - Include patterns for both literal paths and variable usage
+    - _Requirements: Multi-runtime threat detection_
+
+  - [x] 18a.4 Implement catastrophic path detection in scripts
+    - Scan script content for dangerous paths (/, /home, /etc, /var, /usr, ~)
+    - Block scripts that have deletion threats AND catastrophic paths
+    - Handle path normalization edge cases (path.normalize('/') returns '.')
+    - _Requirements: Prevent accidental system damage_
+
+  - [x] 18a.5 Integrate ScriptAnalyzer with RuleEngine
+    - Add checkScriptContent() method to RuleEngine
+    - Call after checkCatastrophicPaths() in validation pipeline
+    - Implement fail-open behavior (allow if script can't be read)
+    - _Requirements: Validation pipeline integration_
+
+  - [x] 18a.6 Write unit tests for ScriptAnalyzer
+    - Test script execution detection for various runtimes
+    - Test dangerous pattern detection (53 tests total)
+    - Test catastrophic path detection
+    - Test fail-open behavior for missing/binary/large files
+    - _Requirements: Comprehensive test coverage_
+
+  - [x] 18a.7 Write integration tests for script analysis
+    - Test through full validation pipeline (21 tests)
+    - Test with wrappers (sudo python, env python)
+    - Test real-world attack scenarios (AI cleanup scripts)
+    - Test rule interaction with script analysis
+    - _Requirements: End-to-end validation_
+
+  - [x] 18a.8 Update README with limitations section
+    - Document what AgentGuard does and doesn't do
+    - Explain defense-in-depth philosophy
+    - Note script analysis limitations (no binary inspection)
+    - _Requirements: User documentation_
 
 - [ ] 19. Implement log viewing command [P2]
   - [ ] 19.1 Add log subcommand to CLI

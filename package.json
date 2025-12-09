@@ -18,11 +18,13 @@
     "test:watch": "vitest",
     "test:unit": "vitest --run tests/unit",
     "test:integration": "vitest --run tests/integration",
-    "test:all": "vitest --run",
+    "test:vitest": "vitest --run",
     "docker:test": "./scripts/docker-test.sh integration",
     "docker:smoke": "./scripts/docker-test.sh smoke",
     "docker:shell": "./scripts/docker-test.sh shell",
-    "docker:clean": "./scripts/docker-test.sh clean"
+    "docker:clean": "./scripts/docker-test.sh clean",
+    "smoke": "./scripts/smoke-test.sh",
+    "test:all": "npm run build && npm test && npm run smoke"
   },
   "keywords": [
     "security",

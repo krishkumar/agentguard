@@ -24,6 +24,12 @@ AgentGuard is a command-line security tool that protects systems from dangerous 
 - **Claude Hook**: A PreToolUse hook script that integrates AgentGuard with Claude Code's hook system
 - **PreToolUse Hook**: Claude Code's mechanism for intercepting and validating commands before execution
 - **Bash Wrapper**: An alternative integration approach that intercepts bash commands via PATH manipulation
+- **Command Unwrapper**: Component that recursively unwraps command wrappers (sudo, bash -c, xargs) to find actual commands
+- **Script Analyzer**: Component that analyzes script file contents for dangerous patterns before execution
+- **Catastrophic Path**: System-critical paths (/, ~, /home, /etc, etc.) that should always be protected from deletion
+- **Inherently Dangerous Command**: Commands like mkfs, dd to block devices that can destroy data regardless of arguments
+- **Passthrough Wrapper**: Commands like sudo, env, nice that execute another command unchanged
+- **Dynamic Executor**: Commands like xargs that receive arguments from external sources (stdin)
 
 ## Requirements
 
@@ -62,6 +68,7 @@ AgentGuard is a command-line security tool that protects systems from dangerous 
 3. WHEN a blocked command is prevented, THE AgentGuard SHALL return a non-zero exit code to the Agent
 4. WHEN the command `rm -rf /` is attempted, THE AgentGuard SHALL block it using the default catastrophic rules
 5. WHEN the command `rm -rf /*` is attempted, THE AgentGuard SHALL block it using the default catastrophic rules
+6. WHEN a command targets any catastrophic path (/, ~, /home, /etc, /usr, /var, /bin, /sbin, /lib, /boot, /dev, /proc, /sys), THE AgentGuard SHALL block it regardless of rule configuration
 
 ### Requirement 4 [P1]
 
@@ -243,6 +250,42 @@ AgentGuard is a command-line security tool that protects systems from dangerous 
 4. WHEN a command uses write indicators (`rm`, `mv`, `cp` with destination argument, `touch`, `mkdir`, `rmdir`, `chmod`, `chown`, `>`, `>>`) targeting a path outside the sandbox, THE AgentGuard SHALL block the command
 5. WHEN no SANDBOX Directives are defined, THE AgentGuard SHALL allow writes to any location (sandbox mode is opt-in)
 
+### Requirement 24 [P0]
+
+**User Story:** As a security-conscious user, I want inherently dangerous commands blocked automatically, so that commands that can destroy disk data are prevented regardless of arguments.
+
+#### Acceptance Criteria
+
+1. WHEN a command is `mkfs`, `mkfs.ext2`, `mkfs.ext3`, `mkfs.ext4`, `mkfs.xfs`, `mkfs.btrfs`, `mkfs.vfat`, `mke2fs`, `mkswap`, `fdisk`, `parted`, `gdisk`, `cfdisk`, or `sfdisk`, THE AgentGuard SHALL block it as inherently dangerous
+2. WHEN a `dd` command writes to a block device (of=/dev/sda, /dev/nvme*, /dev/vd*, /dev/xvd*, /dev/mmcblk*), THE AgentGuard SHALL block it as inherently dangerous
+3. WHEN an inherently dangerous command is blocked, THE AgentGuard SHALL display a message indicating the command is a dangerous system command that can destroy data
+4. WHEN an inherently dangerous command is wrapped (e.g., `sudo mkfs.ext4`), THE AgentGuard SHALL unwrap and still block it
+5. WHEN checking inherently dangerous commands, THE AgentGuard SHALL perform this check before pattern rule matching
+
+### Requirement 25 [P0]
+
+**User Story:** As a security-conscious user, I want script content analyzed before execution, so that dangerous scripts cannot harm my system even if the script file looks innocuous.
+
+#### Acceptance Criteria
+
+1. WHEN a command executes a script file (e.g., `python script.py`, `bash script.sh`, `node script.js`), THE AgentGuard SHALL analyze the script content for dangerous patterns
+2. WHEN a script contains dangerous operations (shutil.rmtree, fs.rmSync, rm -rf) targeting catastrophic paths, THE AgentGuard SHALL block the script execution
+3. WHEN a script cannot be read (file missing, binary file, too large), THE AgentGuard SHALL fail-open and allow the command
+4. WHEN detecting script execution, THE AgentGuard SHALL recognize Python (.py), Node.js (.js, .mjs, .cjs), Shell (.sh, .bash), Ruby (.rb), and Perl (.pl) scripts
+5. WHEN script analysis detects threats, THE AgentGuard SHALL report the specific dangerous patterns found
+
+### Requirement 26 [P0]
+
+**User Story:** As a security-conscious user, I want commands unwrapped recursively, so that dangerous commands hidden behind wrappers like sudo, bash -c, or xargs are still detected and blocked.
+
+#### Acceptance Criteria
+
+1. WHEN a command uses passthrough wrappers (sudo, doas, env, nice, nohup, timeout, time, watch, strace, ltrace, ionice, chroot, runuser), THE AgentGuard SHALL unwrap to find the actual command being executed
+2. WHEN a command uses shell -c wrappers (bash -c, sh -c, zsh -c), THE AgentGuard SHALL parse and unwrap the shell command string
+3. WHEN a command uses dynamic executors (xargs, parallel), THE AgentGuard SHALL detect and flag that arguments are dynamic
+4. WHEN a command uses find -exec, -execdir, -ok, -okdir, or -delete, THE AgentGuard SHALL extract and validate the executed command
+5. WHEN wrappers are nested (e.g., `sudo bash -c "rm -rf /"`), THE AgentGuard SHALL recursively unwrap all layers
+
 ### Requirement 19 [P0]
 
 **User Story:** As a developer, I want AgentGuard to run on modern Node.js versions, so that I can use it with current JavaScript tooling and dependencies.
@@ -349,10 +392,12 @@ The following features are explicitly excluded from all implementation levels:
 1. **Windows Native Support**: Only Windows WSL is supported; native Windows cmd.exe and PowerShell are not supported
 2. **GUI Interface**: AgentGuard is command-line only; no graphical configuration or monitoring interface
 3. **Network Request Interception**: AgentGuard does not intercept or validate network requests made by commands
-4. **Language-Specific Command Detection**: AgentGuard does not parse or validate code passed to interpreters (e.g., `python -c "dangerous code"`, `node -e "dangerous code"`)
+4. **Inline Code Detection**: AgentGuard does not parse code passed via `-c` or `-e` flags (e.g., `python -c "dangerous code"`) - only script files are analyzed
 5. **Real-Time Rule File Watching**: Rule files are loaded at startup; changes require restarting AgentGuard
-6. **Subshell Parsing**: Commands using `$()` or backticks are not parsed recursively (P2 feature, explicitly deferred)
+6. **Subshell Parsing**: Commands using `$()` or backticks are not parsed recursively
 7. **Background Process Management**: Commands with `&` are not specially handled beyond basic tokenization
 8. **Interactive Command Support**: Commands requiring interactive input (vim, less, top) may not work correctly through the wrapper
 9. **ANSI Escape Code Filtering**: AgentGuard passes through terminal formatting but does not validate or sanitize escape codes
-10. **Machine Learning Rule Suggestions**: No AI-based rule recommendation system; learning mode (if implemented) uses simple heuristics only
+10. **Machine Learning Rule Suggestions**: No AI-based rule recommendation system
+11. **Binary File Inspection**: AgentGuard cannot analyze compiled executables or binary files
+12. **Full Sandboxing**: AgentGuard is not a complete sandbox - use Docker/containers for true isolation

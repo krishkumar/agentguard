@@ -59,6 +59,25 @@ export interface CommandSegment {
   operator?: '&&' | '||' | ';' | '|';
 }
 
+/**
+ * Unwrapped command - the actual command being executed after
+ * stripping wrapper commands like sudo, bash -c, xargs, etc.
+ */
+export interface UnwrappedCommand {
+  /** The base command being executed (e.g., 'rm', 'chmod') */
+  command: string;
+  /** Arguments to the command */
+  args: string[];
+  /** Chain of wrappers that were unwrapped (e.g., ['sudo', 'bash -c']) */
+  wrappers: string[];
+  /** Whether the command has dynamic/unresolvable arguments */
+  hasDynamicArgs: boolean;
+  /** Reason if args are dynamic (e.g., 'xargs - paths from stdin') */
+  dynamicReason?: string;
+  /** Original segment this was unwrapped from */
+  originalSegment: CommandSegment;
+}
+
 export interface ParsedCommand {
   original: string;
   normalized: string;
@@ -179,4 +198,81 @@ export interface AgentGuardConfig {
     verbose: boolean;
     color: boolean;
   };
+}
+
+// ============================================================================
+// Script Analysis Types
+// ============================================================================
+
+/** Languages/runtimes that can execute scripts */
+export type ScriptRuntime = 'shell' | 'python' | 'node' | 'ruby' | 'perl' | 'unknown';
+
+/** Category of threat found in script */
+export type ThreatCategory = 'deletion' | 'system_modification' | 'data_exfiltration' | 'shell_execution';
+
+/** Severity level of a threat */
+export type ThreatSeverity = 'low' | 'medium' | 'high' | 'catastrophic';
+
+/** A dangerous pattern found in script content */
+export interface ScriptThreat {
+  /** The dangerous pattern/function that was matched */
+  pattern: string;
+  /** Line number in the script where found (1-indexed) */
+  lineNumber: number;
+  /** The actual line content (truncated if too long) */
+  lineContent: string;
+  /** Category of threat */
+  category: ThreatCategory;
+  /** Severity level */
+  severity: ThreatSeverity;
+  /** Paths extracted from the pattern (if any) */
+  targetPaths?: string[];
+}
+
+/** Result of analyzing a script file */
+export interface ScriptAnalysisResult {
+  /** Path to the script that was analyzed */
+  scriptPath: string;
+  /** Whether analysis was successfully completed */
+  analyzed: boolean;
+  /** If analysis failed, the reason why */
+  analysisError?: string;
+  /** Detected runtime/language of the script */
+  runtime: ScriptRuntime;
+  /** Threats found in the script */
+  threats: ScriptThreat[];
+  /** Should the command be blocked based on script content? */
+  shouldBlock: boolean;
+  /** Human-readable reason for blocking */
+  blockReason?: string;
+}
+
+/** Configuration for script analysis */
+export interface ScriptAnalyzerConfig {
+  /** Maximum file size to analyze in bytes (default: 1MB) */
+  maxFileSize: number;
+  /** Maximum lines to analyze (default: 10000) */
+  maxLines: number;
+  /** Whether to follow symlinks (default: false for security) */
+  followSymlinks: boolean;
+  /** Custom patterns to detect in addition to built-ins */
+  customPatterns?: DangerousPattern[];
+}
+
+/** Definition of a dangerous pattern to detect in scripts */
+export interface DangerousPattern {
+  /** Unique identifier for the pattern */
+  id: string;
+  /** Runtime this pattern applies to (or 'all' for universal) */
+  runtime: ScriptRuntime | 'all';
+  /** Regex pattern to match */
+  regex: RegExp;
+  /** Category of threat */
+  category: ThreatCategory;
+  /** Severity level */
+  severity: ThreatSeverity;
+  /** Group indices in regex that contain paths (for catastrophic path checking) */
+  pathGroups?: number[];
+  /** Human-readable description of what this pattern detects */
+  description: string;
 }

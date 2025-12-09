@@ -240,10 +240,11 @@ describe('Property 7: Parse error recovery', () => {
       fc.constant('@sandbox   '),
       // Invalid prefix
       fc.string({ minLength: 1, maxLength: 50 })
-        .filter(s => !s.includes('\n') && s.trim().length > 0 && 
-                     !s.startsWith('!') && !s.startsWith('?') && 
-                     !s.startsWith('+') && !s.startsWith('@protect') && 
-                     !s.startsWith('@sandbox') && !s.startsWith('#'))
+        .filter(s => !s.includes('\n') && s.trim().length > 0 &&
+                     !s.startsWith('!') && !s.startsWith('?') &&
+                     !s.startsWith('+') && !s.startsWith('@protect') &&
+                     !s.startsWith('@sandbox') && !s.startsWith('#') &&
+                     !s.trim().startsWith('#'))
         .map(s => s),
       // Invalid directive
       fc.constant('@invalid directive'),

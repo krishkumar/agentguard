@@ -21,17 +21,21 @@ describe('Property 14: Quoted string preservation', () => {
     // Generator for strings that contain spaces (the key thing we're testing)
     // Exclude backslashes to avoid escape sequence complications
     // Exclude $ to avoid variable expansion
+    // Exclude ./ and ../ to avoid path expansion
+    // Exclude ~ to avoid home directory expansion
     const stringWithSpacesGenerator = fc.string({ minLength: 3, maxLength: 50 })
-      .filter(s => s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes('$'));
+      .filter(s => s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes('$') && !s.startsWith('./') &&
+                   !s.startsWith('../') && !s.startsWith('~'));
 
     // Generator for command names (no spaces, no quotes, no special shell characters)
     // Exclude: spaces, quotes, backslash, operators, special chars that trigger expansion
     const commandGenerator = fc.string({ minLength: 1, maxLength: 20 })
-      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes(';') && !s.includes('|') && 
-                   !s.includes('&') && !s.includes('#') && !s.includes('>') && 
+      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes(';') && !s.includes('|') &&
+                   !s.includes('&') && !s.includes('#') && !s.includes('>') &&
                    !s.includes('~') && !s.includes('$') && !s.includes('(') && !s.includes(')') &&
+                   !s.startsWith('./') && !s.startsWith('../') && !s.startsWith('.') &&
                    s.trim().length > 0);
 
     // Generator for quote type
@@ -80,14 +84,16 @@ describe('Property 14: Quoted string preservation', () => {
     const tokenizer = new CommandTokenizer();
 
     const stringWithSpacesGenerator = fc.string({ minLength: 3, maxLength: 30 })
-      .filter(s => s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes('$'));
+      .filter(s => s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes('$') && !s.startsWith('./') &&
+                   !s.startsWith('../') && !s.startsWith('~'));
 
     const commandGenerator = fc.string({ minLength: 1, maxLength: 20 })
-      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes(';') && !s.includes('|') && 
-                   !s.includes('&') && !s.includes('#') && !s.includes('>') && 
+      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes(';') && !s.includes('|') &&
+                   !s.includes('&') && !s.includes('#') && !s.includes('>') &&
                    !s.includes('~') && !s.includes('$') && !s.includes('(') && !s.includes(')') &&
+                   !s.startsWith('./') && !s.startsWith('../') && !s.startsWith('.') &&
                    s.trim().length > 0);
 
     const quoteTypeGenerator = fc.constantFrom('"', "'");
@@ -132,8 +138,9 @@ describe('Property 14: Quoted string preservation', () => {
     const tokenizer = new CommandTokenizer();
 
     const quotedStringGenerator = fc.string({ minLength: 3, maxLength: 30 })
-      .filter(s => s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes('$'));
+      .filter(s => s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes('$') && !s.startsWith('./') &&
+                   !s.startsWith('../') && !s.startsWith('~'));
 
     const unquotedStringGenerator = fc.string({ minLength: 1, maxLength: 20 })
       .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
@@ -143,10 +150,11 @@ describe('Property 14: Quoted string preservation', () => {
                    !s.includes('.') && s.trim().length > 0);
 
     const commandGenerator = fc.string({ minLength: 1, maxLength: 20 })
-      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes(';') && !s.includes('|') && 
-                   !s.includes('&') && !s.includes('#') && !s.includes('>') && 
+      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes(';') && !s.includes('|') &&
+                   !s.includes('&') && !s.includes('#') && !s.includes('>') &&
                    !s.includes('~') && !s.includes('$') && !s.includes('(') && !s.includes(')') &&
+                   !s.startsWith('./') && !s.startsWith('../') && !s.startsWith('.') &&
                    s.trim().length > 0);
 
     const quoteTypeGenerator = fc.constantFrom('"', "'");
@@ -199,10 +207,11 @@ describe('Property 14: Quoted string preservation', () => {
                    !s.includes('\\') && !s.includes('$'));
 
     const commandGenerator = fc.string({ minLength: 1, maxLength: 20 })
-      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes(';') && !s.includes('|') && 
-                   !s.includes('&') && !s.includes('#') && !s.includes('>') && 
+      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes(';') && !s.includes('|') &&
+                   !s.includes('&') && !s.includes('#') && !s.includes('>') &&
                    !s.includes('~') && !s.includes('$') && !s.includes('(') && !s.includes(')') &&
+                   !s.startsWith('./') && !s.startsWith('../') && !s.startsWith('.') &&
                    s.trim().length > 0);
 
     fc.assert(
@@ -240,10 +249,11 @@ describe('Property 14: Quoted string preservation', () => {
     const tokenizer = new CommandTokenizer();
 
     const commandGenerator = fc.string({ minLength: 1, maxLength: 20 })
-      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes(';') && !s.includes('|') && 
-                   !s.includes('&') && !s.includes('#') && !s.includes('>') && 
+      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes(';') && !s.includes('|') &&
+                   !s.includes('&') && !s.includes('#') && !s.includes('>') &&
                    !s.includes('~') && !s.includes('$') && !s.includes('(') && !s.includes(')') &&
+                   !s.startsWith('./') && !s.startsWith('../') && !s.startsWith('.') &&
                    s.trim().length > 0);
 
     const quoteTypeGenerator = fc.constantFrom('"', "'");
@@ -275,15 +285,17 @@ describe('Property 14: Quoted string preservation', () => {
     const tokenizer = new CommandTokenizer();
 
     const commandGenerator = fc.string({ minLength: 1, maxLength: 20 })
-      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes(';') && !s.includes('|') && 
-                   !s.includes('&') && !s.includes('#') && !s.includes('>') && 
+      .filter(s => !s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes(';') && !s.includes('|') &&
+                   !s.includes('&') && !s.includes('#') && !s.includes('>') &&
                    !s.includes('~') && !s.includes('$') && !s.includes('(') && !s.includes(')') &&
+                   !s.startsWith('./') && !s.startsWith('../') && !s.startsWith('.') &&
                    s.trim().length > 0);
 
     const stringWithSpacesGenerator = fc.string({ minLength: 3, maxLength: 30 })
-      .filter(s => s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") && 
-                   !s.includes('\\') && !s.includes('$'));
+      .filter(s => s.includes(' ') && !s.includes('\n') && !s.includes('"') && !s.includes("'") &&
+                   !s.includes('\\') && !s.includes('$') && !s.startsWith('./') &&
+                   !s.startsWith('../') && !s.startsWith('~'));
 
     const quoteTypeGenerator = fc.constantFrom('"', "'");
 

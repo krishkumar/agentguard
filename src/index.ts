@@ -31,3 +31,5 @@ export { Validator } from './validator';
 export { CLI } from './cli';
 export { checkNodeVersion, compareVersions, enforceNodeVersion } from './version-checker';
 export { OutputFormatter } from './output-formatter';
+export { CommandUnwrapper } from './command-unwrapper';
+export { ScriptAnalyzer } from './script-analyzer';

@@ -67,9 +67,8 @@ describe('Check Command Integration', () => {
     const output = capturedOutput.join('\n');
     expect(output).toContain('🚫 WOULD BE BLOCKED');
     expect(output).toContain('Command: rm -rf /');
-    expect(output).toContain('Matched Rule: rm -rf /');
-    expect(output).toContain('Rule Source: project');
-    expect(output).toContain('Reason: Blocked by rule: rm -rf /');
+    // rm -rf / is now blocked by catastrophic path detection (before rule matching)
+    expect(output).toContain('Reason: BLOCKED: Catastrophic path detected');
   });
 
   it('should display ALLOWED for allowed commands', async () => {
