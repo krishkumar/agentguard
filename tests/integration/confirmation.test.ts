@@ -221,7 +221,7 @@ function runCommandWithInput(
   try {
     // Use shell: false to prevent shell from interpreting && || ; |
     const result = spawnSync('node', [
-      '/app/dist/bin/agentguard.js',
+      '/app/dist/cli.js',
       '--',
       command
     ], {

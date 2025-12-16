@@ -1,5 +1,11 @@
 # AgentGuard
 
+[![CI](https://github.com/krishkumar/agentguard/workflows/CI/badge.svg)](https://github.com/krishkumar/agentguard/actions)
+[![npm version](https://badge.fury.io/js/ai-agentguard.svg)](https://www.npmjs.com/package/ai-agentguard)
+[![npm downloads](https://img.shields.io/npm/dm/ai-agentguard.svg)](https://www.npmjs.com/package/ai-agentguard)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/node/v/ai-agentguard.svg)](https://nodejs.org/)
+
 **Work safely with agents like Claude Code.**
 
 AI coding agents are powerful, but with great power comes `rm -rf /`.

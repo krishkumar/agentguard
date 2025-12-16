@@ -242,7 +242,7 @@ describe('RuleEngine', () => {
 
       expect(result.action).toBe(ValidationAction.BLOCK);
       // May be blocked by catastrophic path detection OR chained command validation
-      expect(result.reason).toMatch(/Catastrophic path|Chained command blocked/);
+      expect(result.reason).toMatch(/critical system\/user|Chained command blocked/);
     });
 
     it('blocks chain if first segment is blocked', () => {
@@ -339,7 +339,7 @@ describe('RuleEngine', () => {
 
       expect(result.action).toBe(ValidationAction.BLOCK);
       // May be blocked by catastrophic path detection OR chained command validation
-      expect(result.reason).toMatch(/Catastrophic path|Chained command blocked/);
+      expect(result.reason).toMatch(/critical system\/user|Chained command blocked/);
     });
 
     it('allows chain with default policy when no rules match', () => {
@@ -356,7 +356,7 @@ describe('RuleEngine', () => {
     });
   });
 
-  describe('Catastrophic path detection', () => {
+  describe('critical system\/user detection', () => {
     /**
      * Tests for the catastrophic path detection feature.
      * This catches attacks like "rm -rf node_modules dist ~/" where dangerous paths
@@ -386,8 +386,8 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
-      expect(result.reason).toContain('critical system/user files');
+      expect(result.reason).toContain('critical system\/user');
+      expect(result.reason).toContain('critical system\/user files');
     });
 
     it('should block rm -rf with ~ (tilde) hidden among arguments', () => {
@@ -399,7 +399,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block rm -rf /', () => {
@@ -409,7 +409,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block rm -rf /home', () => {
@@ -419,7 +419,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block rm -rf /etc', () => {
@@ -429,7 +429,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block rm -r (without -f) with catastrophic paths', () => {
@@ -440,7 +440,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block rm with combined flags like -fR', () => {
@@ -451,7 +451,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should NOT block rm -rf with safe paths only', () => {
@@ -492,7 +492,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block rm -rf with /usr', () => {
@@ -502,7 +502,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('catastrophic path check runs before pattern rules', () => {
@@ -515,7 +515,7 @@ describe('RuleEngine', () => {
 
       // Should still be blocked despite the ALLOW rule
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
   });
 
@@ -549,7 +549,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
       expect(result.reason).toContain('via sudo');
     });
 
@@ -560,7 +560,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block sudo -u root rm -rf /', () => {
@@ -570,7 +570,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block bash -c "rm -rf /"', () => {
@@ -580,7 +580,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
       expect(result.reason).toContain('via bash -c');
     });
 
@@ -592,7 +592,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block sudo bash -c "rm -rf /"', () => {
@@ -602,7 +602,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
       expect(result.reason).toContain('via sudo');
       expect(result.reason).toContain('bash -c');
     });
@@ -614,7 +614,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block xargs rm -rf with recursive flag', () => {
@@ -658,7 +658,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should block timeout 30 rm -rf /', () => {
@@ -668,7 +668,7 @@ describe('RuleEngine', () => {
       const result = engine.validate(command, rules);
 
       expect(result.action).toBe(ValidationAction.BLOCK);
-      expect(result.reason).toContain('Catastrophic path');
+      expect(result.reason).toContain('critical system\/user');
     });
 
     it('should NOT block sudo ls -la', () => {

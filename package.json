@@ -12,7 +12,7 @@
     "agentguard-shell": "./dist/bin/agentguard-shell.js"
   },
   "scripts": {
-    "build": "tsc && chmod +x dist/bin/*.js && mkdir -p dist/bin/wrappers && cp src/bin/wrappers/* dist/bin/wrappers/ && chmod +x dist/bin/wrappers/*",
+    "build": "./scripts/build.sh",
     "dev": "tsc --watch",
     "test": "vitest --run",
     "test:watch": "vitest",

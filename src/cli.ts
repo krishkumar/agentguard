@@ -592,3 +592,16 @@ Examples:
     process.exit(exitCode);
   }
 }
+
+// Run if called directly
+if (require.main === module) {
+  const cli = new CLI();
+  cli.run(process.argv.slice(2))
+    .then((exitCode) => {
+      process.exit(exitCode);
+    })
+    .catch((error) => {
+      console.error('Fatal error:', error);
+      process.exit(1);
+    });
+}
