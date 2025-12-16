@@ -2,13 +2,13 @@
 
 **Work safely with agents like Claude Code.**
 
-AI coding agents are powerful—but with great power comes `rm -rf /`.
+AI coding agents are powerful, but with great power comes `rm -rf /`.
 
 I've been recommending tools like Claude Code and Cursor to junior devs and non-technical folks lately. These agents can execute shell commands autonomously, which is useful. But it also means a single hallucination could wipe their SSH keys, nuke a folder, or brick a meticulously created dev environment.
 
-Frontier models do come with guardrails, but I wanted control over project-specific no-nos too—like pushing to master or running that one script that drops the staging database.
+Frontier models do come with guardrails, but I wanted control over project-specific no-nos too - like pushing to master or running that one script that drops the staging database.
 
-An LLM deciding whether a command is "safe" is probabilistic. I wanted something classical — a system where I define exactly what's allowed and what's blocked, with no ambiguity. 
+An LLM deciding whether a command is "safe" is probabilistic. I wanted something classical: a system where I define exactly what's allowed and what's blocked, with no ambiguity. 
 
 Inspired by `.gitignore`: simple pattern matching, one rule per line, easy for anyone to read and modify.
 
@@ -20,8 +20,16 @@ Inspired by `.gitignore`: simple pattern matching, one rule per line, easy for a
 - `.gitignore`-style syntax anyone can read
 - Recursive command unwrapping (catches `sudo bash -c "rm -rf /"`)
 - Catastrophic path detection (blocks `rm -rf /`, `rm -rf ~`, etc.)
-- Zero latency—all validation is local
-- Claude Code hook integration
+- Zero latency - all validation is local
+
+### Supported Agents
+
+| Agent | Status | Install Command |
+|-------|--------|-----------------|
+| Claude Code | ✅ Supported | `agentguard install claude` |
+| Kiro CLI | ✅ Supported | `agentguard install kiro` |
+| Cursor | 🔜 Coming soon | - |
+| Windsurf | 🔜 Coming soon | - |
 
 ## Install
 
@@ -54,7 +62,7 @@ AgentGuard intercepts shell commands before they execute and validates them agai
 
 ### Recursive Command Unwrapping
 
-AgentGuard doesn't just look at the surface command—it recursively unwraps nested command wrappers to find what's actually being executed. This catches attempts to hide dangerous commands behind innocent-looking wrappers:
+AgentGuard doesn't just look at the surface command - it recursively unwraps nested command wrappers to find what's actually being executed. This catches attempts to hide dangerous commands behind innocent-looking wrappers:
 
 ```bash
 # All of these get unwrapped to detect the underlying "rm" command:
@@ -70,9 +78,7 @@ xargs rm -rf                     # → rm (with dynamic args)
 - **Shell -c**: `bash`, `sh`, `zsh`, `dash`, `fish`, `ksh`, `csh`, `tcsh`
 - **Dynamic executors**: `xargs`, `parallel`, `find -exec`, `find -delete`
 
-Commands executed via `xargs` or `find -exec` are flagged as having dynamic arguments, since their actual targets come from stdin or file matching.
-
-Here's what that looks like in practice:
+Here's what a standard block looks like in practice:
 
 ```
 > run nuketown.sh
@@ -94,8 +100,11 @@ You create a `.agentguard` file in your project root with patterns for commands 
 # The obvious dangerous stuff
 !rm -rf /
 !rm -rf /*
+!rm -rf ~
+!rm -rf ~/*
 !mkfs*
 !dd if=* of=/dev/*
+!shred*
 
 # Don't let agents read my secrets
 !cat ~/.ssh/*
@@ -153,14 +162,14 @@ AgentGuard is **defense-in-depth**, not a complete sandbox.
 
 ### What AgentGuard Does NOT Do
 
-- **Full sandboxing** — Use Docker/containers for true isolation
-- **Binary inspection** — Cannot analyze compiled executables
-- **Network blocking** — Does not prevent data exfiltration
-- **Complete bypass prevention** — A determined attacker can work around pattern matching
+- **Full sandboxing** - Use Docker/containers for true isolation
+- **Binary inspection** - Cannot analyze compiled executables
+- **Network blocking** - Does not prevent data exfiltration
+- **Complete bypass prevention** - A determined attacker can work around pattern matching
 
 ### Why Use AgentGuard?
 
-Many developers run AI agents with `--dangerously-skip-permissions` or habitually auto-accept prompts. AgentGuard catches the common footguns—accidental `rm -rf /`, leaked credentials, that one script that drops staging—even when permission prompts are bypassed.
+Many developers run AI agents with `--dangerously-skip-permissions` or habitually auto-accept prompts. AgentGuard catches the common footguns - accidental `rm -rf /`, leaked credentials, that one script that drops staging - even when permission prompts are bypassed.
 
 For critical systems, combine AgentGuard with containerization. This tool handles the everyday "oh no what did it just run" moments; Docker handles the adversarial edge cases.
 
