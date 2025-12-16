@@ -294,7 +294,7 @@ function runAgentguardCommand(
     // Use shell: false to prevent shell from interpreting && || ; |
     // The command is passed as a single argument to agentguard
     const result = spawnSync('node', [
-      '/app/dist/bin/agentguard.js',
+      '/app/dist/cli.js',
       '--',
       command
     ], {
