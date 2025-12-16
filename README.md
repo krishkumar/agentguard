@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/node/v/ai-agentguard.svg)](https://nodejs.org/)
 
-**Work safely with agents like Claude Code.**
+**Work safely with agents like Claude Code, Cursor, Kiro CLI.**
 
 AI coding agents are powerful, but with great power comes `rm -rf /`.
 
