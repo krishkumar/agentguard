@@ -156,7 +156,7 @@ Usage:
 
 Targets:
   claude                            Claude Code (hook-based, recommended)
-  kiro                              Kiro CLI (wrapper-based)
+  kiro                              Kiro CLI (hook-based)
 
 Install Flags:
   --global                          Install globally (~/.claude/settings.json)
@@ -171,10 +171,12 @@ Examples:
   agentguard init                   Create .agentguard rules in current directory
   agentguard install claude         Install Claude Code hook (project-local)
   agentguard install claude --global Install Claude Code hook (global)
-  agentguard install kiro           Show Kiro usage instructions
+  agentguard install kiro           Install Kiro CLI hook (project-local)
+  agentguard install kiro --global  Install Kiro CLI hook (global)
   agentguard uninstall claude       Remove Claude Code hook
+  agentguard uninstall kiro         Remove Kiro CLI hook
   agentguard -- claude              Wrap Claude with protection (legacy)
-  agentguard -- kiro chat           Wrap Kiro CLI with protection
+  agentguard -- kiro chat           Wrap Kiro CLI with protection (legacy)
   agentguard check "rm -rf /"       Test if command would be blocked
     `.trim());
   }
@@ -301,37 +303,114 @@ Examples:
   }
 
   /**
-   * Show instructions for using AgentGuard with Kiro
-   * Kiro doesn't have a hook system like Claude Code, so we use the wrapper approach
+   * Install Kiro hook configuration
    */
-  private showKiroInstructions(): void {
-    console.log(`
-AgentGuard + Kiro CLI
-=====================
+  private async installKiroHook(global: boolean): Promise<void> {
+    const fs = await import('fs');
+    const os = await import('os');
 
-Kiro doesn't have a pre-command hook system, so AgentGuard uses the wrapper approach.
+    // Determine config path
+    const configDir = global
+      ? path.join(os.homedir(), '.config', 'kiro')
+      : path.join(process.cwd(), '.kiro');
+    const configPath = path.join(configDir, 'agent.json');
 
-Usage:
-  agentguard -- kiro chat           Start Kiro chat with protection
-  agentguard -- kiro agent          Start Kiro agent with protection
-  agentguard -- kiro translate      Use Kiro translate with protection
+    // Determine hook command path - always use absolute path
+    const hookPath = path.join(__dirname, 'bin', 'kiro-hook.js');
 
-How it works:
-  AgentGuard wraps Kiro and intercepts shell commands via the SHELL environment
-  variable. Any command Kiro tries to execute will be validated against your
-  .agentguard rules.
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
 
-Setup:
-  1. Run "agentguard init" to create .agentguard rules (if not done)
-  2. Use "agentguard -- kiro <command>" instead of "kiro <command>"
+    // Load existing config or create new
+    let config: Record<string, unknown> = {};
+    if (fs.existsSync(configPath)) {
+      try {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      } catch (e) {
+        console.warn('Warning: Could not parse existing agent.json, creating new one');
+      }
+    }
 
-Optional - Create an alias for convenience:
-  alias kiro-safe="agentguard -- kiro"
+    // Add/update hooks configuration
+    const hooks = config.hooks as Record<string, unknown>[] || [];
+    
+    // Remove existing AgentGuard hook if present
+    const filteredHooks = hooks.filter((hook: any) => 
+      !hook.command?.includes('agentguard') && !hook.command?.includes('kiro-hook')
+    );
 
-Then use:
-  kiro-safe chat
-  kiro-safe agent
-    `.trim());
+    // Add new AgentGuard hook
+    filteredHooks.push({
+      event: 'PreToolUse',
+      matcher: 'execute_bash',
+      command: `node ${hookPath}`,
+      timeout_ms: 5000
+    });
+
+    config.hooks = filteredHooks;
+
+    // Write updated config
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    // Success message
+    const location = global ? 'globally' : 'for this project';
+    console.log(`✅ AgentGuard hook installed ${location}`);
+    console.log('');
+    console.log(`Config file: ${configPath}`);
+    console.log('');
+    console.log('The hook will now validate all bash commands before execution.');
+    console.log('Commands matching BLOCK rules in .agentguard will be prevented.');
+  }
+
+  /**
+   * Uninstall Kiro hook configuration
+   */
+  private async uninstallKiroHook(global: boolean): Promise<void> {
+    const fs = await import('fs');
+    const os = await import('os');
+
+    // Determine config path
+    const configDir = global
+      ? path.join(os.homedir(), '.config', 'kiro')
+      : path.join(process.cwd(), '.kiro');
+    const configPath = path.join(configDir, 'agent.json');
+
+    if (!fs.existsSync(configPath)) {
+      console.log('No Kiro config file found. Nothing to uninstall.');
+      return;
+    }
+
+    // Load existing config
+    let config: Record<string, unknown>;
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    } catch (e) {
+      throw new Error('Could not parse agent.json');
+    }
+
+    // Remove AgentGuard hooks
+    if (config.hooks) {
+      const hooks = config.hooks as Record<string, unknown>[];
+      const filteredHooks = hooks.filter((hook: any) => 
+        !hook.command?.includes('agentguard') && !hook.command?.includes('kiro-hook')
+      );
+
+      if (filteredHooks.length < hooks.length) {
+        config.hooks = filteredHooks;
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+        const location = global ? 'globally' : 'for this project';
+        console.log(`✅ AgentGuard hook uninstalled ${location}`);
+        console.log('');
+        console.log('Kiro will no longer validate commands through AgentGuard.');
+      } else {
+        console.log('No AgentGuard hook found in config. Nothing to uninstall.');
+      }
+    } else {
+      console.log('No hooks found in config. Nothing to uninstall.');
+    }
   }
 
   /**
@@ -342,7 +421,7 @@ Then use:
    */
   private async handleInstall(target: string, global: boolean): Promise<void> {
     if (target === 'kiro') {
-      this.showKiroInstructions();
+      await this.installKiroHook(global);
       return;
     }
 
@@ -428,11 +507,7 @@ Then use:
     const os = await import('os');
 
     if (target === 'kiro') {
-      console.log('Kiro uses the wrapper approach. No installation needed.');
-      console.log('');
-      console.log('To use AgentGuard with Kiro, run:');
-      console.log('  agentguard -- kiro chat');
-      console.log('  agentguard -- kiro agent');
+      await this.uninstallKiroHook(global);
       return;
     }
 

@@ -42,7 +42,8 @@ npm link
 
 ```bash
 agentguard init           # Creates .agentguard with sensible defaults
-agentguard install claude # Registers the hook
+agentguard install claude # Registers the Claude Code hook
+agentguard install kiro   # Registers the Kiro CLI hook
 ```
 
 That's it. Every shell command Claude tries to run now goes through AgentGuard first.
@@ -107,24 +108,31 @@ You create a `.agentguard` file in your project root with patterns for commands 
 
 The syntax is deliberately simple. `!` means block, `*` is a wildcard. That's basically it.
 
-## How it works with Claude Code
+## How it works with AI Agents
+
+### Claude Code
 
 Claude Code has a hook system that lets you intercept tool calls before they run. AgentGuard registers a `PreToolUse` hook that receives every Bash command as JSON, validates it against your rules, and returns exit code 0 (allow) or 2 (block).
+
+### Kiro CLI
+
+Kiro CLI also supports hooks through its agent configuration system. AgentGuard registers a `PreToolUse` hook that intercepts `execute_bash` commands, validates them against your rules, and returns the appropriate exit code.
 
 ## Commands
 
 ```bash
 agentguard init             # Create .agentguard with sensible defaults
 agentguard install claude   # Register the Claude Code hook
-agentguard uninstall claude # Remove the hook
+agentguard install kiro     # Register the Kiro CLI hook
+agentguard uninstall claude # Remove the Claude Code hook
+agentguard uninstall kiro   # Remove the Kiro CLI hook
 agentguard check "rm -rf /" # Test if a command would be blocked
 ```
 
 ## Roadmap
 
-Right now this only works with Claude Code's hook system. I'd like to add support for:
+AgentGuard now supports both Claude Code and Kiro CLI through their respective hook systems. Future integrations planned:
 
-- Kiro CLI
 - Cursor
 - Windsurf
 - Other agentic tools as they add hook APIs
