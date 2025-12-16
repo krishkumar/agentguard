@@ -1,6 +1,6 @@
 {
   "name": "ai-agentguard",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Command-line security tool that protects systems from dangerous commands executed by AI coding agents like Claude Code and Kiro CLI",
   "main": "dist/index.js",
   "files": [
