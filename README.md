@@ -33,8 +33,8 @@ Inspired by `.gitignore`: simple pattern matching, one rule per line, easy for a
 | Agent | Status | Install Command |
 |-------|--------|-----------------|
 | Claude Code | ✅ Supported | `agentguard install claude` |
+| Cursor | ✅ Supported | `agentguard install cursor` |
 | Kiro CLI | ✅ Supported | `agentguard install kiro` |
-| Cursor | 🔜 Coming soon | - |
 | Windsurf | 🔜 Coming soon | - |
 
 ## Install
@@ -57,6 +57,7 @@ npm link
 ```bash
 agentguard init           # Creates .agentguard with sensible defaults
 agentguard install claude # Registers the Claude Code hook
+agentguard install cursor # Registers the Cursor hook
 agentguard install kiro   # Registers the Kiro CLI hook
 ```
 
@@ -129,6 +130,10 @@ The syntax is deliberately simple. `!` means block, `*` is a wildcard. That's ba
 
 Claude Code has a hook system that lets you intercept tool calls before they run. AgentGuard registers a `PreToolUse` hook that receives every Bash command as JSON, validates it against your rules, and returns exit code 0 (allow) or 2 (block).
 
+### Cursor
+
+Cursor also supports the same `PreToolUse` hook system as Claude Code. AgentGuard registers a hook that intercepts Bash commands, validates them against your rules, and returns the appropriate exit code to allow or block execution.
+
 ### Kiro CLI
 
 Kiro CLI also supports hooks through its agent configuration system. AgentGuard registers a `PreToolUse` hook that intercepts `execute_bash` commands, validates them against your rules, and returns the appropriate exit code.
@@ -138,17 +143,18 @@ Kiro CLI also supports hooks through its agent configuration system. AgentGuard 
 ```bash
 agentguard init             # Create .agentguard with sensible defaults
 agentguard install claude   # Register the Claude Code hook
+agentguard install cursor   # Register the Cursor hook
 agentguard install kiro     # Register the Kiro CLI hook
 agentguard uninstall claude # Remove the Claude Code hook
+agentguard uninstall cursor # Remove the Cursor hook
 agentguard uninstall kiro   # Remove the Kiro CLI hook
 agentguard check "rm -rf /" # Test if a command would be blocked
 ```
 
 ## Roadmap
 
-AgentGuard now supports both Claude Code and Kiro CLI through their respective hook systems. Future integrations planned:
+AgentGuard now supports Claude Code, Cursor, and Kiro CLI through their respective hook systems. Future integrations planned:
 
-- Cursor
 - Windsurf
 - Other agentic tools as they add hook APIs
 
@@ -178,6 +184,14 @@ AgentGuard is **defense-in-depth**, not a complete sandbox.
 Many developers run AI agents with `--dangerously-skip-permissions` or habitually auto-accept prompts. AgentGuard catches the common footguns - accidental `rm -rf /`, leaked credentials, that one script that drops staging - even when permission prompts are bypassed.
 
 For critical systems, combine AgentGuard with containerization. This tool handles the everyday "oh no what did it just run" moments; Docker handles the adversarial edge cases.
+
+## References
+
+### Official Hook Documentation
+
+- **Claude Code**: [Hooks Documentation](https://code.claude.com/docs/en/hooks)
+- **Cursor**: [Agent Hooks Documentation](https://cursor.com/docs/agent/hooks)
+- **Kiro CLI**: [Hooks Documentation](https://kiro.dev/docs/cli/hooks/)
 
 ## Built with
 

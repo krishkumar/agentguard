@@ -156,11 +156,12 @@ Usage:
 
 Targets:
   claude                            Claude Code (hook-based, recommended)
+  cursor                            Cursor (hook-based)
   kiro                              Kiro CLI (hook-based)
 
 Install Flags:
-  --global                          Install globally (~/.claude/settings.json)
-                                    Default: project-local (.claude/settings.json)
+  --global                          Install globally (~/.claude/settings.json or ~/.cursor/settings.json)
+                                    Default: project-local (.claude/settings.json or .cursor/settings.json)
 
 Flags:
   --verbose                         Enable verbose output
@@ -171,9 +172,12 @@ Examples:
   agentguard init                   Create .agentguard rules in current directory
   agentguard install claude         Install Claude Code hook (project-local)
   agentguard install claude --global Install Claude Code hook (global)
+  agentguard install cursor         Install Cursor hook (project-local)
+  agentguard install cursor --global Install Cursor hook (global)
   agentguard install kiro           Install Kiro CLI hook (project-local)
   agentguard install kiro --global  Install Kiro CLI hook (global)
   agentguard uninstall claude       Remove Claude Code hook
+  agentguard uninstall cursor       Remove Cursor hook
   agentguard uninstall kiro         Remove Kiro CLI hook
   agentguard -- claude              Wrap Claude with protection (legacy)
   agentguard -- kiro chat           Wrap Kiro CLI with protection (legacy)
@@ -414,6 +418,143 @@ Examples:
   }
 
   /**
+   * Install Cursor hook configuration
+   */
+  private async installCursorHook(global: boolean): Promise<void> {
+    const fs = await import('fs');
+    const os = await import('os');
+
+    // Determine settings path
+    const settingsDir = global
+      ? path.join(os.homedir(), '.cursor')
+      : path.join(process.cwd(), '.cursor');
+    const settingsPath = path.join(settingsDir, 'settings.json');
+
+    // Determine hook command path - always use absolute path
+    const hookPath = path.join(__dirname, 'bin', 'cursor-hook.js');
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(settingsDir)) {
+      fs.mkdirSync(settingsDir, { recursive: true });
+    }
+
+    // Load existing settings or create new
+    let settings: Record<string, unknown> = {};
+    if (fs.existsSync(settingsPath)) {
+      try {
+        const content = fs.readFileSync(settingsPath, 'utf8');
+        settings = JSON.parse(content);
+      } catch (error) {
+        console.warn(`Warning: Could not parse existing settings file. Creating new one.`);
+      }
+    }
+
+    // Ensure hooks structure exists
+    if (!settings.hooks) {
+      settings.hooks = {};
+    }
+
+    const hooks = settings.hooks as Record<string, unknown>;
+    if (!hooks.PreToolUse) {
+      hooks.PreToolUse = [];
+    }
+
+    const preToolUseHooks = hooks.PreToolUse as Array<unknown>;
+
+    // Check if AgentGuard hook already exists
+    const existingHookIndex = preToolUseHooks.findIndex((hook: any) => 
+      hook?.hooks?.[0]?.command?.includes('cursor-hook.js')
+    );
+
+    const newHook = {
+      matcher: "Bash",
+      hooks: [
+        {
+          type: "command",
+          command: `node ${hookPath}`
+        }
+      ]
+    };
+
+    if (existingHookIndex >= 0) {
+      // Update existing hook
+      preToolUseHooks[existingHookIndex] = newHook;
+    } else {
+      // Add new hook
+      preToolUseHooks.push(newHook);
+    }
+
+    // Write settings file
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+    // Success message
+    const location = global ? 'globally' : 'for this project';
+    console.log(`✅ AgentGuard hook installed ${location}`);
+    console.log('');
+    console.log(`Settings file: ${settingsPath}`);
+    console.log('');
+    console.log('Restart Cursor for changes to take effect.');
+    console.log('');
+    console.log('AgentGuard will now validate Bash commands before Cursor executes them.');
+  }
+
+  /**
+   * Uninstall Cursor hook configuration
+   */
+  private async uninstallCursorHook(global: boolean): Promise<void> {
+    const fs = await import('fs');
+    const os = await import('os');
+
+    // Determine settings path
+    const settingsDir = global
+      ? path.join(os.homedir(), '.cursor')
+      : path.join(process.cwd(), '.cursor');
+    const settingsPath = path.join(settingsDir, 'settings.json');
+
+    if (!fs.existsSync(settingsPath)) {
+      console.log('No Cursor settings file found. Nothing to uninstall.');
+      return;
+    }
+
+    // Load existing settings
+    let settings: Record<string, unknown>;
+    try {
+      const content = fs.readFileSync(settingsPath, 'utf8');
+      settings = JSON.parse(content);
+    } catch (error) {
+      console.log('Could not parse settings file. Nothing to uninstall.');
+      return;
+    }
+
+    // Check if hooks exist
+    const hooks = settings.hooks as Record<string, unknown>;
+    if (hooks && hooks.PreToolUse) {
+      const preToolUseHooks = hooks.PreToolUse as Array<unknown>;
+      
+      // Remove AgentGuard hooks
+      const filteredHooks = preToolUseHooks.filter((hook: any) => 
+        !hook?.hooks?.[0]?.command?.includes('cursor-hook.js')
+      );
+
+      if (filteredHooks.length !== preToolUseHooks.length) {
+        hooks.PreToolUse = filteredHooks;
+        
+        // Write updated settings
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+        const location = global ? 'globally' : 'for this project';
+        console.log(`✅ AgentGuard hook uninstalled ${location}`);
+        console.log('');
+        console.log('Cursor will no longer validate commands through AgentGuard.');
+      } else {
+        console.log('No AgentGuard hook found in settings. Nothing to uninstall.');
+      }
+    } else {
+      console.log('No hooks found in settings. Nothing to uninstall.');
+    }
+  }
+
+  /**
    * Handle install command - Install hook for AI agent
    *
    * @param target - The AI agent to install for (e.g., 'claude', 'kiro')
@@ -425,8 +566,13 @@ Examples:
       return;
     }
 
+    if (target === 'cursor') {
+      await this.installCursorHook(global);
+      return;
+    }
+
     if (target !== 'claude') {
-      throw new Error(`Unknown target: ${target}. Supported targets: claude, kiro`);
+      throw new Error(`Unknown target: ${target}. Supported targets: claude, cursor, kiro`);
     }
 
     const fs = await import('fs');
@@ -511,8 +657,13 @@ Examples:
       return;
     }
 
+    if (target === 'cursor') {
+      await this.uninstallCursorHook(global);
+      return;
+    }
+
     if (target !== 'claude') {
-      throw new Error(`Unknown target: ${target}. Supported targets: claude, kiro`);
+      throw new Error(`Unknown target: ${target}. Supported targets: claude, cursor, kiro`);
     }
 
     // Determine settings path
