@@ -1,6 +1,6 @@
 {
   "name": "ai-agentguard",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Command-line security tool that protects systems from dangerous commands executed by AI coding agents like Claude Code, Cursor, and Kiro CLI",
   "main": "dist/index.js",
   "files": [
@@ -36,6 +36,7 @@
     "claude",
     "cursor",
     "kiro",
+    "opencode",
     "guardrails"
   ],
   "author": "krishkumar",
