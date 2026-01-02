@@ -35,6 +35,7 @@ Inspired by `.gitignore`: simple pattern matching, one rule per line, easy for a
 | Claude Code | ✅ Supported | `agentguard install claude` |
 | Cursor | ✅ Supported | `agentguard install cursor` |
 | Kiro CLI | ✅ Supported | `agentguard install kiro` |
+| OpenCode | ✅ Supported | `agentguard install opencode` |
 | Windsurf | 🔜 Coming soon | - |
 
 ## Install
@@ -59,6 +60,7 @@ agentguard init           # Creates .agentguard with sensible defaults
 agentguard install claude # Registers the Claude Code hook
 agentguard install cursor # Registers the Cursor hook
 agentguard install kiro   # Registers the Kiro CLI hook
+agentguard install opencode # Registers the OpenCode plugin
 ```
 
 That's it. Every shell command Claude tries to run now goes through AgentGuard first.
@@ -138,6 +140,10 @@ Cursor also supports the same `PreToolUse` hook system as Claude Code. AgentGuar
 
 Kiro CLI also supports hooks through its agent configuration system. AgentGuard registers a `PreToolUse` hook that intercepts `execute_bash` commands, validates them against your rules, and returns the appropriate exit code.
 
+### OpenCode
+
+OpenCode supports plugins through its plugin system. AgentGuard creates a plugin that uses the `tool.execute.before` hook to intercept bash commands, validates them against your rules, and throws an error to block execution if needed.
+
 ## Commands
 
 ```bash
@@ -145,9 +151,11 @@ agentguard init             # Create .agentguard with sensible defaults
 agentguard install claude   # Register the Claude Code hook
 agentguard install cursor   # Register the Cursor hook
 agentguard install kiro     # Register the Kiro CLI hook
+agentguard install opencode # Register the OpenCode plugin
 agentguard uninstall claude # Remove the Claude Code hook
 agentguard uninstall cursor # Remove the Cursor hook
 agentguard uninstall kiro   # Remove the Kiro CLI hook
+agentguard uninstall opencode # Remove the OpenCode plugin
 agentguard check "rm -rf /" # Test if a command would be blocked
 ```
 

@@ -158,6 +158,7 @@ Targets:
   claude                            Claude Code (hook-based, recommended)
   cursor                            Cursor (hook-based)
   kiro                              Kiro CLI (hook-based)
+  opencode                          OpenCode (plugin-based)
 
 Install Flags:
   --global                          Install globally (~/.claude/settings.json or ~/.cursor/settings.json)
@@ -176,8 +177,12 @@ Examples:
   agentguard install cursor --global Install Cursor hook (global)
   agentguard install kiro           Install Kiro CLI hook (project-local)
   agentguard install kiro --global  Install Kiro CLI hook (global)
+  agentguard install opencode       Install OpenCode plugin (project-local)
+  agentguard install opencode --global Install OpenCode plugin (global)
   agentguard uninstall claude       Remove Claude Code hook
   agentguard uninstall cursor       Remove Cursor hook
+  agentguard uninstall kiro         Remove Kiro CLI hook
+  agentguard uninstall opencode     Remove OpenCode plugin
   agentguard uninstall kiro         Remove Kiro CLI hook
   agentguard -- claude              Wrap Claude with protection (legacy)
   agentguard -- kiro chat           Wrap Kiro CLI with protection (legacy)
@@ -369,6 +374,76 @@ Examples:
   }
 
   /**
+   * Install OpenCode plugin
+   */
+  private async installOpenCodePlugin(global: boolean): Promise<void> {
+    const fs = await import('fs');
+    const os = await import('os');
+
+    // Determine plugin directory
+    const pluginDir = global
+      ? path.join(os.homedir(), '.config', 'opencode', 'plugin')
+      : path.join(process.cwd(), '.opencode', 'plugin');
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(pluginDir)) {
+      fs.mkdirSync(pluginDir, { recursive: true });
+    }
+
+    const pluginPath = path.join(pluginDir, 'agentguard.js');
+    const hookPath = path.join(__dirname, '..', 'validator.js');
+
+    // Create the plugin file
+    const pluginContent = `
+const { Validator } = require('${hookPath}');
+
+export const AgentGuardPlugin = async ({ project, client, $, directory, worktree }) => {
+  return {
+    "tool.execute.before": async (input, output) => {
+      // Only validate bash/shell commands
+      if (input.tool !== 'bash' && input.tool !== 'execute_bash') {
+        return;
+      }
+
+      const command = output.args?.command;
+      if (!command) {
+        return;
+      }
+
+      // Validate through AgentGuard
+      const validator = new Validator();
+      const result = validator.validate(command);
+
+      if (result.action === 'BLOCK') {
+        throw new Error(\`🚫 AgentGuard BLOCKED: \${command}\\nRule: \${result.rule?.pattern}\\nReason: \${result.reason}\`);
+      }
+
+      if (result.action === 'CONFIRM') {
+        throw new Error(\`⚠️ AgentGuard CONFIRM required: \${command}\\nThis command requires manual confirmation. Run it directly in terminal.\`);
+      }
+    },
+  };
+};
+`.trim();
+
+    fs.writeFileSync(pluginPath, pluginContent);
+
+    // Success message
+    const location = global ? 'globally' : 'for this project';
+    console.log(`✅ AgentGuard plugin installed ${location}`);
+    console.log('');
+    console.log(`Plugin file: ${pluginPath}`);
+    console.log('');
+    console.log('The plugin will intercept all bash commands and validate them against');
+    console.log('your .agentguard rules before execution.');
+    console.log('');
+    console.log('Next steps:');
+    console.log('  1. Run "agentguard init" to create default rules (if not already done)');
+    console.log('  2. Restart OpenCode to activate the plugin');
+    console.log('  3. Edit .agentguard to customize rules for your project');
+  }
+
+  /**
    * Uninstall Kiro hook configuration
    */
   private async uninstallKiroHook(global: boolean): Promise<void> {
@@ -555,6 +630,34 @@ Examples:
   }
 
   /**
+   * Uninstall OpenCode plugin
+   */
+  private async uninstallOpenCodePlugin(global: boolean): Promise<void> {
+    const fs = await import('fs');
+    const os = await import('os');
+
+    // Determine plugin directory
+    const pluginDir = global
+      ? path.join(os.homedir(), '.config', 'opencode', 'plugin')
+      : path.join(process.cwd(), '.opencode', 'plugin');
+    
+    const pluginPath = path.join(pluginDir, 'agentguard.js');
+
+    if (!fs.existsSync(pluginPath)) {
+      console.log('No AgentGuard plugin found. Nothing to uninstall.');
+      return;
+    }
+
+    // Remove the plugin file
+    fs.unlinkSync(pluginPath);
+
+    const location = global ? 'globally' : 'for this project';
+    console.log(`✅ AgentGuard plugin uninstalled ${location}`);
+    console.log('');
+    console.log('OpenCode will no longer validate commands through AgentGuard.');
+  }
+
+  /**
    * Handle install command - Install hook for AI agent
    *
    * @param target - The AI agent to install for (e.g., 'claude', 'kiro')
@@ -571,8 +674,13 @@ Examples:
       return;
     }
 
+    if (target === 'opencode') {
+      await this.installOpenCodePlugin(global);
+      return;
+    }
+
     if (target !== 'claude') {
-      throw new Error(`Unknown target: ${target}. Supported targets: claude, cursor, kiro`);
+      throw new Error(`Unknown target: ${target}. Supported targets: claude, cursor, kiro, opencode`);
     }
 
     const fs = await import('fs');
@@ -662,8 +770,13 @@ Examples:
       return;
     }
 
+    if (target === 'opencode') {
+      await this.uninstallOpenCodePlugin(global);
+      return;
+    }
+
     if (target !== 'claude') {
-      throw new Error(`Unknown target: ${target}. Supported targets: claude, cursor, kiro`);
+      throw new Error(`Unknown target: ${target}. Supported targets: claude, cursor, kiro, opencode`);
     }
 
     // Determine settings path
