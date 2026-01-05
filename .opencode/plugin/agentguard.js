@@ -1,4 +1,4 @@
-const { Validator } = require('/Volumes/SSD1/workspace/scratch/nextproduct-agentguard/validator.js');
+const { Validator } = require('ai-agentguard');
 
 export const AgentGuardPlugin = async ({ project, client, $, directory, worktree }) => {
   return {
@@ -17,11 +17,11 @@ export const AgentGuardPlugin = async ({ project, client, $, directory, worktree
       const validator = new Validator();
       const result = validator.validate(command);
 
-      if (result.action === 'BLOCK') {
-        throw new Error(`🚫 AgentGuard BLOCKED: ${command}\nRule: ${result.rule?.pattern}\nReason: ${result.reason}`);
+      if (result.action === 'block') {
+        throw new Error(`🚫 AgentGuard BLOCKED: ${command}\nReason: ${result.reason}`);
       }
 
-      if (result.action === 'CONFIRM') {
+      if (result.action === 'confirm') {
         throw new Error(`⚠️ AgentGuard CONFIRM required: ${command}\nThis command requires manual confirmation. Run it directly in terminal.`);
       }
     },
