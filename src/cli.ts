@@ -29,7 +29,8 @@ export class CLI {
 
       // Handle version flag
       if (args[0] === '--version' || args[0] === '-v' || args[0] === 'version') {
-        console.log('ai-agentguard v1.0.2');
+        const packageJson = require('../package.json');
+        console.log(`ai-agentguard v${packageJson.version}`);
         return 0;
       }
 
